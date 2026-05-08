@@ -1,0 +1,37 @@
+# FinTrack — единый запуск инфраструктуры в режиме разработки.                                                                                                
+  # На этом этапе compose поднимает только PostgreSQL.                                                                                                          
+  # Backend и frontend пока запускаются на хосте; будут добавлены сюда отдельными шагами.                                                                       
+  #
+  # Запуск:               docker compose up -d                                                                                                                  
+  # Логи (живой режим):   docker compose logs -f db               
+  # Остановка:            docker compose down                                                                                                                   
+  # Полная очистка БД:    docker compose down -v   (удалит volume вместе с данными)
+                                                                                                                                                                
+  services:                                                       
+    db:
+      image: postgres:15-alpine                                                                                                                                 
+      container_name: fintrack-db
+      restart: unless-stopped                                                                                                                                   
+      environment:                                                
+        # На dev-этапе пароль захардкожен. Перед публикацией Docker-образа в продакшен
+        # перенесём креды в .env-файл (этап 3 плана compose).                                                                                                   
+        POSTGRES_USER: fintrack
+        POSTGRES_PASSWORD: fintrack_dev_password                                                                                                                
+        POSTGRES_DB: fintrack                                                                                                                                   
+      ports:
+        # Внешний порт 55432 — выше диапазона Hyper-V (<50000), чтобы не словить WinError 10013.                                                                
+        # Внутри сети compose контейнеры обращаются друг к другу по стандартному 5432.                                                                          
+        - "55432:5432"
+      volumes:                                                                                                                                                  
+        # Именованный volume — данные БД переживают `docker compose down`.
+        # Уничтожаются только при `docker compose down -v`.                                                                                                     
+        - postgres_data:/var/lib/postgresql/data                  
+      healthcheck:                                                                                                                                              
+        # Когда добавим backend-сервис, он будет ждать `service_healthy` через depends_on.
+        test: ["CMD-SHELL", "pg_isready -U fintrack -d fintrack"]                                                                                               
+        interval: 5s                                                                                                                                            
+        timeout: 5s
+        retries: 5                                                                                                                                              
+                                                                  
+  volumes:
+    postgres_data:
