@@ -1,37 +1,64 @@
-# FinTrack — единый запуск инфраструктуры в режиме разработки.                                                                                                
-  # На этом этапе compose поднимает только PostgreSQL.                                                                                                          
-  # Backend и frontend пока запускаются на хосте; будут добавлены сюда отдельными шагами.                                                                       
-  #
-  # Запуск:               docker compose up -d                                                                                                                  
-  # Логи (живой режим):   docker compose logs -f db               
-  # Остановка:            docker compose down                                                                                                                   
-  # Полная очистка БД:    docker compose down -v   (удалит volume вместе с данными)
-                                                                                                                                                                
-  services:                                                       
-    db:
-      image: postgres:15-alpine                                                                                                                                 
-      container_name: fintrack-db
-      restart: unless-stopped                                                                                                                                   
-      environment:                                                
-        # На dev-этапе пароль захардкожен. Перед публикацией Docker-образа в продакшен
-        # перенесём креды в .env-файл (этап 3 плана compose).                                                                                                   
-        POSTGRES_USER: fintrack
-        POSTGRES_PASSWORD: fintrack_dev_password                                                                                                                
-        POSTGRES_DB: fintrack                                                                                                                                   
-      ports:
-        # Внешний порт 55432 — выше диапазона Hyper-V (<50000), чтобы не словить WinError 10013.                                                                
-        # Внутри сети compose контейнеры обращаются друг к другу по стандартному 5432.                                                                          
-        - "55432:5432"
-      volumes:                                                                                                                                                  
-        # Именованный volume — данные БД переживают `docker compose down`.
-        # Уничтожаются только при `docker compose down -v`.                                                                                                     
-        - postgres_data:/var/lib/postgresql/data                  
-      healthcheck:                                                                                                                                              
-        # Когда добавим backend-сервис, он будет ждать `service_healthy` через depends_on.
-        test: ["CMD-SHELL", "pg_isready -U fintrack -d fintrack"]                                                                                               
-        interval: 5s                                                                                                                                            
-        timeout: 5s
-        retries: 5                                                                                                                                              
-                                                                  
-  volumes:
-    postgres_data:
+# FinTrack — единый запуск инфраструктуры в режиме разработки.
+# Поднимает backend (FastAPI) и БД (PostgreSQL) одной командой.
+# Frontend (React) пока запускается на хосте; будет добавлен сюда отдельным шагом.
+#
+# Запуск:               docker compose up -d
+# Сборка после правок:  docker compose up -d --build
+# Логи backend (live):  docker compose logs -f backend
+# Остановка:            docker compose down
+# Полная очистка БД:    docker compose down -v   (удалит volume вместе с данными)
+#
+# Alembic-миграции:
+#   docker compose run --rm backend alembic revision --autogenerate -m "описание"
+#   docker compose run --rm backend alembic upgrade head
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: fintrack-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fintrack
+      POSTGRES_PASSWORD: fintrack_dev_password
+      POSTGRES_DB: fintrack
+    ports:
+      # Экспонируем 55432 на хосте — для подключения внешних инструментов
+      # (DBeaver, pgAdmin). Backend внутри compose обращается по имени сервиса db:5432.
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintrack -d fintrack"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fintrack-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Внутри docker-network backend обращается к БД по имени сервиса db.
+      # Перебивает значение из backend/.env (env vars имеют приоритет в pydantic-settings).
+      DATABASE_URL: postgresql+asyncpg://fintrack:fintrack_dev_password@db:5432/fintrack
+      ENVIRONMENT: dev
+      # Чтобы логи python печатались в реальном времени, без буферизации.
+      PYTHONUNBUFFERED: "1"
+    ports:
+      # Хост 60000 → контейнер 8000. /health доступен на http://localhost:60000/health
+      - "60000:8000"
+    volumes:
+      # Код хоста монтируется в /app — изменения подхватываются hot-reload-ом.
+      - ./backend:/app
+      # Анонимный volume для /app/.venv: предотвращает «утечку» Windows-binarнок .venv
+      # хоста внутрь Linux-контейнера. Внутри контейнера зависимости установлены
+      # в системный site-packages, .venv не нужен.
+      - /app/.venv
+
+volumes:
+  postgres_data:

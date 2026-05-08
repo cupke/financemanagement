@@ -1,0 +1,19 @@
+# Что НЕ копировать в образ при сборке (`COPY . .`).
+# Это уменьшает размер образа и предотвращает попадание Windows-binarнок .venv в Linux-контейнер.
+
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+# Локальные секреты — в контейнер пробрасываются через docker-compose env, не файлом.
+.env
+
+# Архивы, лежащие рядом
+*.tar.gz
+
+# Временные тестовые скрипты (test_db.py, test_socket.py и т.п.)
+test_*.py
