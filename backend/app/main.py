@@ -5,17 +5,23 @@
   """
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from swagger_ui_bundle import swagger_ui_path
 
 from app.api.v1 import accounts as accounts_router
-from app.api.v1 import categories as categories_router
 from app.api.v1 import auth as auth_router
+from app.api.v1 import categories as categories_router
 from app.api.v1 import users as users_router
 from app.config import settings
 from app.db.session import get_session
 
 
+  # docs_url=None — отключаем дефолтный /docs, который тащит ассеты с
+  # cdn.jsdelivr.net (на машине пользователя CDN блокируется расширением/
+  # антивирусом). Дальше регистрируем свой /docs с локальными ассетами.
 app = FastAPI(
       title="FinTrack API",
       description=(
@@ -23,13 +29,15 @@ app = FastAPI(
           "с открытым REST API и мультивалютностью по курсам ЦБ РФ."
       ),
       version="0.1.0",
+      docs_url=None,
   )
+# Swagger UI 4.x (тот, что в pip-пакете swagger-ui-bundle 1.x) понимает
+  # только OpenAPI 3.0. FastAPI по умолчанию пишет 3.1 — переключаем на 3.0.2,
+  # чтобы наши схемы рендерились в Swagger. Свои фичи 3.1 мы не используем.
+app.openapi_version = "3.0.2"
 
 
   # CORS-middleware — разрешает frontend (другой origin) делать запросы к API.
-  # Без него браузер блокирует кросс-доменные XHR/fetch по Same-Origin Policy.
-  # allow_credentials=True нужен на будущее, когда refresh-токен переедет в
-  # httpOnly-cookie. allow_methods=["*"] — стандартный REST: GET/POST/PUT/DELETE.
 app.add_middleware(
       CORSMiddleware,
       allow_origins=settings.cors_origins,
@@ -37,6 +45,27 @@ app.add_middleware(
       allow_methods=["*"],
       allow_headers=["*"],
   )
+
+
+  # Локальные ассеты Swagger UI (JS и CSS), упакованные в pip-пакет
+  # swagger-ui-bundle. Раздаём их через StaticFiles на /static-docs/*.
+  # Так Swagger перестаёт зависеть от внешнего CDN.
+app.mount(
+      "/static-docs",
+      StaticFiles(directory=swagger_ui_path),
+      name="static-docs",
+  )
+
+
+  # Свой /docs, использующий локальные ассеты вместо CDN.
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html() -> object:
+      return get_swagger_ui_html(
+          openapi_url=app.openapi_url,
+          title=f"{app.title} — Swagger UI",
+          swagger_js_url="/static-docs/swagger-ui-bundle.js",
+          swagger_css_url="/static-docs/swagger-ui.css",
+      )
 
 
   # Все бизнес-эндпоинты живут под префиксом /api/v1 — единый namespace для версионирования API.
