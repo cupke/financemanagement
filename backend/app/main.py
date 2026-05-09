@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1 import accounts as accounts_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import users as users_router
 from app.config import settings
@@ -40,6 +41,7 @@ app.add_middleware(
   # Все бизнес-эндпоинты живут под префиксом /api/v1 — единый namespace для версионирования API.
 app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(users_router.router, prefix="/api/v1")
+app.include_router(accounts_router.router, prefix="/api/v1")
 
 
 @app.get(
