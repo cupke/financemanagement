@@ -37,6 +37,7 @@
     // Пункты sidebar — массив, чтобы добавлять новые (категории, история) одной строкой.
     const navItems = [
       { to: '/accounts', label: 'Счета', icon: '🏦' },
+      { to: '/transactions', label: 'История', icon: '📝' },
       { to: '/categories', label: 'Категории', icon: '📂' },
       { to: '/me', label: 'Профиль', icon: '👤' },
     ]

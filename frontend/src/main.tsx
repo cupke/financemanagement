@@ -9,6 +9,7 @@
   // Стили Mantine. @mantine/modals использует базовый Modal из @mantine/core
   // и собственного styles.css не имеет — отдельный импорт не нужен.
   import '@mantine/core/styles.css'
+  import '@mantine/dates/styles.css'
   import '@mantine/notifications/styles.css'
 
   import App from './App'

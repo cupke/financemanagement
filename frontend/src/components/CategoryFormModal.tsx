@@ -23,6 +23,10 @@
   interface Props {
     opened: boolean
     onClose: () => void
+    // Опциональный колбэк: вызывается после успешного создания категории
+    // с объектом созданной категории. Используется, например, в форме
+    // транзакции, чтобы автоматически выбрать только что созданную категорию.
+    onCreated?: (category: CategoryRead) => void
   }
 
   // Строит данные для Select из плоского списка категорий: рекурсивно обходит
@@ -45,7 +49,7 @@
     function walk(cat: CategoryRead, depth: number): void {
       options.push({
         value: String(cat.id),
-        //   — неразрывный пробел, его HTML/Mantine не схлопывают в один.
+        // \u00A0 — неразрывный пробел, его HTML/Mantine не схлопывают в один.
         label: '\u00A0\u00A0'.repeat(depth) + cat.name,
       })
       const children = childrenMap.get(cat.id) ?? []
@@ -55,7 +59,7 @@
     return options
   }
 
-  export function CategoryFormModal({ opened, onClose }: Props) {
+  export function CategoryFormModal({ opened, onClose, onCreated }: Props) {
     const queryClient = useQueryClient()
 
     // Для Select-а с возможными родителями нужен список категорий. Используем
@@ -86,6 +90,7 @@
           color: 'green',
         })
         queryClient.invalidateQueries({ queryKey: ['categories'] })
+        onCreated?.(data)
         form.reset()
         onClose()
       },
