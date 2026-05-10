@@ -55,7 +55,7 @@ import { Link, useNavigate } from 'react-router-dom'
           message: 'Вход выполнен',
           color: 'green',
         })
-        navigate('/me')
+        navigate('/accounts')
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {

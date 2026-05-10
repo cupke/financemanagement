@@ -1,35 +1,41 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
-import { LoginPage } from './pages/LoginPage'
-import { RegisterPage } from './pages/RegisterPage'
-import { MePage } from './pages/MePage'
-import { ProtectedRoute } from './components/ProtectedRoute'
+  import { Routes, Route, Navigate } from 'react-router-dom'
 
-// Корневой компонент приложения — задаёт карту маршрутов.
-// React Router сопоставляет URL в адресной строке с одним из <Route> и рендерит его element.
-export default function App() {
-  return (
-    <Routes>
-      {/* Публичные страницы — доступны без авторизации. */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+  import { LoginPage } from './pages/LoginPage'
+  import { RegisterPage } from './pages/RegisterPage'
+  import { MePage } from './pages/MePage'
+  import { AccountsPage } from './pages/AccountsPage'
+  import { CategoriesPage } from './pages/CategoriesPage'
+  import { ProtectedRoute } from './components/ProtectedRoute'
+  import { AppLayout } from './components/AppLayout'
 
-      {/* Защищённая страница — обёртка ProtectedRoute проверит наличие токена,
-          и если его нет — перебросит на /login. На текущем шаге обёртка ещё не умеет
-          проверять токен (это сделаем на следующем шаге), поэтому пока пускает всех. */}
-      <Route
-        path="/me"
-        element={
-          <ProtectedRoute>
-            <MePage />
-          </ProtectedRoute>
-        }
-      />
+  // Корневой компонент приложения — задаёт карту маршрутов.
+  // React Router сопоставляет URL в адресной строке с одним из <Route> и рендерит его element.
+  //
+  // Структура:
+  // - Публичные роуты (/login, /register) — без layout, open для всех.
+  // - Защищённая группа: ProtectedRoute проверяет токен, AppLayout даёт sidebar+header.
+  //   Дочерние роуты (/accounts, /me) рендерятся в <Outlet /> AppLayout.
+  // - Корневой /  → редирект на /accounts (главный экран после логина).
+  export default function App() {
+    return (
+      <Routes>
+        {/* Публичные страницы */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
-      {/* Корень / — редирект на /me. Если токена нет, ProtectedRoute дальше перебросит на /login. */}
-      <Route path="/" element={<Navigate to="/me" replace />} />
+        {/* Защищённая группа: токен проверяется один раз на уровне ProtectedRoute,
+            AppLayout даёт sidebar+header, дочерние роуты подставляются через Outlet. */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppLayout />}>
+            <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/me" element={<MePage />} />
+          </Route>
+        </Route>
 
-      {/* Любой неизвестный URL — тоже редирект на /me (потом, при желании, заменим на 404-страницу). */}
-      <Route path="*" element={<Navigate to="/me" replace />} />
-    </Routes>
-  )
-}
+        {/* Корень → главный экран */}
+        <Route path="/" element={<Navigate to="/accounts" replace />} />
+        <Route path="*" element={<Navigate to="/accounts" replace />} />
+      </Routes>
+    )
+  }

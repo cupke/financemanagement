@@ -55,7 +55,7 @@
           message: 'Аккаунт создан',
           color: 'green',
         })
-        navigate('/me')
+        navigate('/accounts')
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {
