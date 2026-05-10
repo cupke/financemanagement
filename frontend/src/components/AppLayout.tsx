@@ -1,4 +1,4 @@
-  import { Link, NavLink as RouterNavLink, Outlet, useNavigate } from 'react-router-dom'
+  import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
   import {
     AppShell,
     Burger,
@@ -11,7 +11,9 @@
   } from '@mantine/core'
   import { useDisclosure } from '@mantine/hooks'
   import { notifications } from '@mantine/notifications'
+  import { useQuery } from '@tanstack/react-query'
 
+  import { getMeRequest } from '../api/auth'
   import { useAuthStore } from '../stores/auth'
 
   // Главный layout для авторизованных пользователей: header сверху + sidebar слева
@@ -19,10 +21,19 @@
   // бургер-меню (breakpoint sm = 768px).
   export function AppLayout() {
     const navigate = useNavigate()
+    // useLocation даёт текущий URL — нужен для подсветки активного пункта sidebar.
+    const location = useLocation()
     const clearToken = useAuthStore((state) => state.clearToken)
     // useDisclosure — Mantine-хук для пары {opened, toggle/close/open}. Здесь
     // управляет видимостью sidebar на мобильных.
     const [opened, { toggle, close }] = useDisclosure()
+
+    // Email текущего юзера — показываем в правой части header. queryKey совпадает
+    // с тем, что использует /me и axios-интерсептор; данные кешированы.
+    const { data: user } = useQuery({
+      queryKey: ['me'],
+      queryFn: getMeRequest,
+    })
 
     const handleLogout = () => {
       clearToken()
@@ -41,6 +52,16 @@
       { to: '/categories', label: 'Категории', icon: '📂' },
       { to: '/me', label: 'Профиль', icon: '👤' },
     ]
+
+    // Проверка «активен ли пункт»: совпадает с текущим путём или это его
+    // префикс (для будущих детальных страниц вроде /accounts/123 — корневой
+    // пункт «Счета» останется подсвеченным).
+    function isActive(itemPath: string): boolean {
+      return (
+        location.pathname === itemPath ||
+        location.pathname.startsWith(itemPath + '/')
+      )
+    }
 
     return (
       <AppShell
@@ -62,9 +83,13 @@
                 <Title order={3}>FinTrack</Title>
               </UnstyledButton>
             </Group>
-            <Text size="sm" c="dimmed">
-              Личные финансы
-            </Text>
+            {/* Email юзера в header — показывает, в чьём аккаунте сидишь.
+                Пока useQuery загружается — пусто, не дёргаемся placeholder'ом. */}
+            {user && (
+              <Text size="sm" c="dimmed" truncate>
+                {user.email}
+              </Text>
+            )}
           </Group>
         </AppShell.Header>
 
@@ -74,11 +99,14 @@
               {navItems.map((item) => (
                 <NavLink
                   key={item.to}
-                  component={RouterNavLink}
+                  component={Link}
                   to={item.to}
                   label={item.label}
                   leftSection={<Text>{item.icon}</Text>}
                   onClick={close}
+                  // active — подсветка текущего пункта sidebar. Без неё пользователь
+                  // не понимает по визуалу, на какой странице сейчас находится.
+                  active={isActive(item.to)}
                 />
               ))}
             </Stack>

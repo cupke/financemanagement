@@ -25,8 +25,11 @@
   // (> 6 уровней) отступы будут уезжать — это разумное ограничение для UX.
   const INDENT_PX = 24
 
+  // Ширина «слота» стрелки/спейсера — фиксированная, чтобы названия категорий
+  // без детей выравнивались по тем же координатам, что и с детьми.
+  const TOGGLE_WIDTH = 26
+
   // Строит карту parentId → отсортированный по id массив прямых детей.
-  // Из неё рекурсивно рендерится дерево.
   function groupByParent(
     categories: CategoryRead[],
   ): Map<number | null, CategoryRead[]> {
@@ -46,38 +49,56 @@
     category: CategoryRead
     depth: number
     childrenMap: Map<number | null, CategoryRead[]>
+    expanded: Set<number>
+    onToggle: (id: number) => void
     onDelete: (cat: CategoryRead) => void
     deletingId: number | undefined
   }
 
-  // Рекурсивный компонент строки. Рендерит карточку категории + детей через
-  // тот же CategoryRow с depth+1.
+  // Рекурсивный компонент строки. Карточка категории + стрелка expand/collapse
+  // слева (если есть дети) + дети рендерятся только при isExpanded.
   function CategoryRow({
     category,
     depth,
     childrenMap,
+    expanded,
+    onToggle,
     onDelete,
     deletingId,
   }: RowProps) {
     const children = childrenMap.get(category.id) ?? []
+    const hasChildren = children.length > 0
+    const isExpanded = expanded.has(category.id)
+
     return (
       <>
         <Card
           withBorder
           p="sm"
-          // marginLeft через style — Mantine ml ожидает числовые отступы
-          // из своей шкалы (xs/sm/md/...), произвольное значение проще через style.
           style={{ marginLeft: depth * INDENT_PX }}
         >
           <Group justify="space-between" wrap="nowrap">
-            <Stack gap={2}>
-              <Text fw={500}>{category.name}</Text>
-              <Text size="xs" c="dimmed">
-                ID #{category.id}
-                {category.parent_id !== null &&
-                  ` · родитель #${category.parent_id}`}
+            <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+              {hasChildren ? (
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label={isExpanded ? 'Свернуть' : 'Развернуть'}
+                  onClick={() => onToggle(category.id)}
+                >
+                  {/* ▶ / ▼ — unicode-стрелки. Чище любого эмодзи и не требуют
+                      отдельной библиотеки иконок. */}
+                  <Text size="xs">{isExpanded ? '▼' : '▶'}</Text>
+                </ActionIcon>
+              ) : (
+                // Спейсер той же ширины — чтобы названия категорий без детей
+                // не выравнивались по другой оси, чем с детьми.
+                <div style={{ width: TOGGLE_WIDTH, flexShrink: 0 }} />
+              )}
+              <Text fw={500} truncate>
+                {category.name}
               </Text>
-            </Stack>
+            </Group>
             <ActionIcon
               variant="subtle"
               color="red"
@@ -89,22 +110,28 @@
             </ActionIcon>
           </Group>
         </Card>
-        {children.map((child) => (
-          <CategoryRow
-            key={child.id}
-            category={child}
-            depth={depth + 1}
-            childrenMap={childrenMap}
-            onDelete={onDelete}
-            deletingId={deletingId}
-          />
-        ))}
+        {/* Дети рендерятся только если родитель развёрнут. */}
+        {isExpanded &&
+          children.map((child) => (
+            <CategoryRow
+              key={child.id}
+              category={child}
+              depth={depth + 1}
+              childrenMap={childrenMap}
+              expanded={expanded}
+              onToggle={onToggle}
+              onDelete={onDelete}
+              deletingId={deletingId}
+            />
+          ))}
       </>
     )
   }
 
   export function CategoriesPage() {
     const [modalOpened, setModalOpened] = useState(false)
+    // Set развёрнутых категорий по id. По умолчанию пустой — все свёрнуты.
+    const [expanded, setExpanded] = useState<Set<number>>(new Set())
     const queryClient = useQueryClient()
 
     const { data: categories, isLoading, isError } = useQuery({
@@ -148,6 +175,35 @@
       })
     }
 
+    // Toggle развёрнутости отдельной категории. Immutable обновление Set —
+    // создаём новый, чтобы React заметил изменение.
+    const toggleExpand = (id: number) => {
+      setExpanded((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    }
+
+    // После создания новой категории автоматически разворачиваем её родителя
+    // и всех вышестоящих предков. Иначе пользователь создаст «Хлеб» в свёрнутых
+    // «Продукты» в «Расходы» — и не увидит результат.
+    const handleCategoryCreated = (newCat: CategoryRead) => {
+      if (newCat.parent_id === null) return // корневая — нет предков для разворота
+      if (!categories) return
+
+      const ancestorsToExpand = new Set<number>()
+      let currentParentId: number | null = newCat.parent_id
+      while (currentParentId !== null) {
+        ancestorsToExpand.add(currentParentId)
+        const parent = categories.find((c) => c.id === currentParentId)
+        currentParentId = parent?.parent_id ?? null
+      }
+
+      setExpanded((prev) => new Set([...prev, ...ancestorsToExpand]))
+    }
+
     if (isLoading) {
       return (
         <Container py="xl">
@@ -171,7 +227,9 @@
       <Container size="md" py="xl">
         <Group justify="space-between" mb="lg">
           <Title order={2}>Категории</Title>
-          <Button onClick={() => setModalOpened(true)}>+ Добавить категорию</Button>
+          <Button onClick={() => setModalOpened(true)}>
+            + Добавить категорию
+          </Button>
         </Group>
 
         {categories.length === 0 ? (
@@ -191,6 +249,8 @@
                 category={root}
                 depth={0}
                 childrenMap={childrenMap}
+                expanded={expanded}
+                onToggle={toggleExpand}
                 onDelete={handleDelete}
                 deletingId={deleteMutation.variables}
               />
@@ -201,6 +261,7 @@
         <CategoryFormModal
           opened={modalOpened}
           onClose={() => setModalOpened(false)}
+          onCreated={handleCategoryCreated}
         />
       </Container>
     )

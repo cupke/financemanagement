@@ -1,11 +1,14 @@
   import { useEffect, useState } from 'react'
   import {
     Button,
+    Card,
+    Group,
     Modal,
     NumberInput,
     SegmentedControl,
     Select,
     Stack,
+    Text,
     Textarea,
   } from '@mantine/core'
   import { DateTimePicker } from '@mantine/dates'
@@ -15,9 +18,11 @@
   import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
   import { z } from 'zod'
 
-  import { listAccountsRequest } from '../api/accounts'
-  import { listCategoriesRequest, type CategoryRead } from '../api/categories'
+  import { listAccountsRequest, type AccountRead } from '../api/accounts'
+  import { listCategoriesRequest } from '../api/categories'
   import { createTransactionRequest } from '../api/transactions'
+  import { buildCategoryOptions } from '../lib/categoryTree'
+  import { formatMoney } from '../lib/format'
   import { CategoryFormModal } from './CategoryFormModal'
 
   // Zod-схема. Mantine 9 dates возвращают строки ISO 8601, а не Date — поэтому
@@ -52,32 +57,6 @@
   interface Props {
     opened: boolean
     onClose: () => void
-  }
-
-  // Дублируется с CategoryFormModal — оставлено сознательно, чтобы не плодить
-  // shared-utility ради двух мест. Если будут третьи — вынесем в lib/categoryTree.ts.
-  function buildCategoryOptions(
-    categories: CategoryRead[],
-  ): { value: string; label: string }[] {
-    const childrenMap = new Map<number | null, CategoryRead[]>()
-    for (const cat of categories) {
-      const arr = childrenMap.get(cat.parent_id) ?? []
-      arr.push(cat)
-      childrenMap.set(cat.parent_id, arr)
-    }
-    for (const arr of childrenMap.values()) {
-      arr.sort((a, b) => a.id - b.id)
-    }
-    const options: { value: string; label: string }[] = []
-    function walk(cat: CategoryRead, depth: number) {
-      options.push({
-        value: String(cat.id),
-        label: '\u00A0\u00A0'.repeat(depth) + cat.name,
-      })
-      for (const child of childrenMap.get(cat.id) ?? []) walk(child, depth + 1)
-    }
-    for (const root of childrenMap.get(null) ?? []) walk(root, 0)
-    return options
   }
 
   export function TransactionFormModal({ opened, onClose }: Props) {
@@ -177,6 +156,31 @@
     }))
     const categoryOptions = buildCategoryOptions(categories)
 
+    // Live-preview балансов: ищем выбранные счета по id и считаем «было → стало».
+    // Если что-то не выбрано — соответствующие переменные останутся null и блок
+    // превью просто не отрендерится.
+    const sourceAccount =
+      accounts.find((a) => String(a.id) === form.values.account_id) ?? null
+    const targetAccount =
+      accounts.find(
+        (a) => String(a.id) === (form.values.transfer_account_id ?? ''),
+      ) ?? null
+    const amount = Number(form.values.amount) || 0
+
+    function sourceBalanceAfter(): number | null {
+      if (!sourceAccount || amount <= 0) return null
+      const current = Number(sourceAccount.balance)
+      if (form.values.kind === 'income') return current + amount
+      // expense и transfer оба списывают со source.
+      return current - amount
+    }
+
+    function targetBalanceAfter(): number | null {
+      if (!targetAccount || amount <= 0) return null
+      if (form.values.kind !== 'transfer') return null
+      return Number(targetAccount.balance) + amount
+    }
+
     const handleClose = () => {
       form.reset()
       onClose()
@@ -238,6 +242,19 @@
               {...form.getInputProps('amount')}
             />
 
+            {/* Live-preview балансов. Показывается только когда счёт выбран
+                и amount > 0 — иначе превью бессмысленно. Подсказывает
+                пользователю результат до подтверждения операции. */}
+            {sourceAccount && amount > 0 && (
+              <BalancePreview
+                source={sourceAccount}
+                sourceAfter={sourceBalanceAfter()}
+                target={targetAccount}
+                targetAfter={targetBalanceAfter()}
+                isTransfer={form.values.kind === 'transfer'}
+              />
+            )}
+
             {/* Условное поле: категория — для income/expense, не для transfer.
                 Под Select — ссылка для создания новой категории не выходя из формы. */}
             {form.values.kind !== 'transfer' && (
@@ -297,5 +314,89 @@
           }}
         />
       </Modal>
+    )
+  }
+
+  // ─── Live-preview балансов ──────────────────────────────────────────────
+
+  interface BalancePreviewProps {
+    source: AccountRead
+    sourceAfter: number | null
+    target: AccountRead | null
+    targetAfter: number | null
+    isTransfer: boolean
+  }
+
+  function BalancePreview({
+    source,
+    sourceAfter,
+    target,
+    targetAfter,
+    isTransfer,
+  }: BalancePreviewProps) {
+    return (
+      <Card withBorder p="sm" bg="gray.0">
+        <Stack gap={6}>
+          <PreviewRow
+            label={isTransfer ? 'Со счёта' : 'Счёт'}
+            accountName={source.name}
+            currentBalance={Number(source.balance)}
+            newBalance={sourceAfter}
+            currencyCode={source.currency_code}
+          />
+          {isTransfer && target && (
+            <PreviewRow
+              label="На счёт"
+              accountName={target.name}
+              currentBalance={Number(target.balance)}
+              newBalance={targetAfter}
+              currencyCode={target.currency_code}
+            />
+          )}
+        </Stack>
+      </Card>
+    )
+  }
+
+  interface PreviewRowProps {
+    label: string
+    accountName: string
+    currentBalance: number
+    newBalance: number | null
+    currencyCode: string
+  }
+
+  function PreviewRow({
+    label,
+    accountName,
+    currentBalance,
+    newBalance,
+    currencyCode,
+  }: PreviewRowProps) {
+    // Если будущий баланс отрицательный — подсвечиваем красным как warning.
+    // Не запрещаем (бывают кредитные карты, овердрафты), но обращаем внимание.
+    const willBeNegative = newBalance !== null && newBalance < 0
+    return (
+      <Group justify="space-between" wrap="nowrap" gap="xs">
+        <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+          <Text size="xs" c="dimmed">
+            {label}
+          </Text>
+          <Text size="sm" fw={500} truncate>
+            {accountName}
+          </Text>
+        </Stack>
+        <Group gap={4} wrap="nowrap">
+          <Text size="sm" c="dimmed">
+            {formatMoney(currentBalance, currencyCode)}
+          </Text>
+          <Text size="sm" c="dimmed">
+            →
+          </Text>
+          <Text size="sm" fw={600} c={willBeNegative ? 'red' : undefined}>
+            {newBalance !== null ? formatMoney(newBalance, currencyCode) : '—'}
+          </Text>
+        </Group>
+      </Group>
     )
   }

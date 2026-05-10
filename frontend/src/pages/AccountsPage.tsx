@@ -20,7 +20,7 @@
     type AccountRead,
   } from '../api/accounts'
   import { AccountFormModal } from '../components/AccountFormModal'
-  import { formatMoney } from '../lib/format'
+  import { formatMoney, pluralRu } from '../lib/format'
 
   // Главная страница после логина: список счетов с балансами и кнопка добавления.
   export function AccountsPage() {
@@ -99,6 +99,28 @@
           <Button onClick={() => setModalOpened(true)}>+ Добавить счёт</Button>
         </Group>
 
+        {/* Hero-карточка с общим капиталом — самая важная цифра дашборда.
+        Поставлена в самый верх, чтобы пользователю не приходилось скроллить
+        до конца списка для ответа «сколько у меня всего». Балансы группируются
+        по валютам — складывать разные валюты без курсов нельзя. */}
+        {accounts.length > 0 && (
+          <Card withBorder p="md" mb="lg" bg="gray.0">
+            <Stack gap={4}>
+              <Text size="sm" c="dimmed">
+                Общий капитал · {accounts.length}{' '}
+                {pluralRu(accounts.length, 'счёт', 'счёта', 'счетов')}
+              </Text>
+              <Group gap="lg" wrap="wrap">
+                {Object.entries(totalsByCurrency).map(([code, total]) => (
+                  <Text key={code} fw={700} size="xl">
+                    {formatMoney(total, code)}
+                  </Text>
+                ))}
+              </Group>
+            </Stack>
+          </Card>
+        )}
+
         {accounts.length === 0 ? (
           <Card withBorder p="xl">
             <Stack align="center" gap="xs">
@@ -113,14 +135,9 @@
             {accounts.map((account) => (
               <Card key={account.id} withBorder p="md">
                 <Group justify="space-between" wrap="nowrap">
-                  <Stack gap={2}>
-                    <Text fw={600} size="lg">
-                      {account.name}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      ID #{account.id}
-                    </Text>
-                  </Stack>
+                  <Text fw={600} size="lg">
+                    {account.name}
+                  </Text>
                   <Group gap="md" wrap="nowrap">
                     <Text fw={700} size="xl">
                       {formatMoney(account.balance, account.currency_code)}
@@ -141,17 +158,6 @@
                 </Group>
               </Card>
             ))}
-
-            <Card withBorder p="md" mt="md" bg="gray.0">
-              <Stack gap={2}>
-                <Text fw={600}>Итого</Text>
-                {Object.entries(totalsByCurrency).map(([code, total]) => (
-                  <Text key={code} size="lg">
-                    {formatMoney(total, code)}
-                  </Text>
-                ))}
-              </Stack>
-            </Card>
           </Stack>
         )}
 

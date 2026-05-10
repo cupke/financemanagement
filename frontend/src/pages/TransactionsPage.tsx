@@ -9,6 +9,7 @@
     Select,
     Stack,
     Text,
+    TextInput,
     Title,
   } from '@mantine/core'
   import { DatePickerInput } from '@mantine/dates'
@@ -38,11 +39,73 @@
     transfer: { label: 'Перевод', color: 'blue', sign: '±' },
   }
 
+  // Ключ группировки: "YYYY-MM-DD" в локальной зоне юзера (а не UTC) — чтобы
+  // "сегодняшние" операции группировались по календарю пользователя.
+  function dateKey(iso: string): string {
+    const d = new Date(iso)
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  // Заголовок для группы: «Сегодня» / «Вчера» / «10 мая 2026».
+  function formatDateHeader(key: string): string {
+    const today = dateKey(new Date().toISOString())
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayKey = dateKey(yesterday.toISOString())
+
+    if (key === today) return 'Сегодня'
+    if (key === yesterdayKey) return 'Вчера'
+
+    // Парсим обратно YYYY-MM-DD в Date через локальный конструктор (Y, M-1, D).
+    // Не используем new Date(key) — он трактует "YYYY-MM-DD" как UTC, что
+    // приводит к смещению на часовой пояс.
+    const [y, m, d] = key.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  }
+
+  // Группирует транзакции по дате (локальной). Возвращает массив пар
+  // [dateKey, transactions[]] в порядке убывания даты — свежие группы первыми.
+  function groupByDate(
+    transactions: TransactionRead[],
+  ): Array<[string, TransactionRead[]]> {
+    const map = new Map<string, TransactionRead[]>()
+    for (const tx of transactions) {
+      const key = dateKey(tx.occurred_at)
+      const arr = map.get(key) ?? []
+      arr.push(tx)
+      map.set(key, arr)
+    }
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+
+  // Сводка доход/расход по валютам. Переводы не считаем — общий капитал
+  // пользователя при переводе между его счетами не меняется.
+  function computeTotals(
+    transactions: TransactionRead[],
+  ): Map<string, { income: number; expense: number }> {
+    const totals = new Map<string, { income: number; expense: number }>()
+    for (const tx of transactions) {
+      if (tx.kind === 'transfer') continue
+      const current = totals.get(tx.currency_code) ?? { income: 0, expense: 0 }
+      if (tx.kind === 'income') current.income += Number(tx.amount)
+      else current.expense += Number(tx.amount)
+      totals.set(tx.currency_code, current)
+    }
+    return totals
+  }
+
   export function TransactionsPage() {
     const [modalOpened, setModalOpened] = useState(false)
-    // filters — единый объект с применёнными фильтрами. Каждое изменение
-    // меняет queryKey TanStack Query, и список перезапрашивается.
     const [filters, setFilters] = useState<TransactionListFilters>({})
+    // Локальный поиск по заметкам — фильтрация на клиенте без перезапроса.
+    const [searchQuery, setSearchQuery] = useState('')
     const queryClient = useQueryClient()
 
     const { data: transactions, isLoading, isError } = useQuery({
@@ -50,8 +113,6 @@
       queryFn: () => listTransactionsRequest(filters),
     })
 
-    // Загружаем счета и категории, чтобы показывать имена вместо id.
-    // Эти запросы кешируются — при переключении страниц данные мгновенные.
     const { data: accounts = [] } = useQuery({
       queryKey: ['accounts'],
       queryFn: listAccountsRequest,
@@ -61,9 +122,22 @@
       queryFn: listCategoriesRequest,
     })
 
-    // Lookup-таблицы для O(1)-доступа по id.
     const accountById = new Map(accounts.map((a) => [a.id, a]))
     const categoryById = new Map(categories.map((c) => [c.id, c]))
+
+    // Клиентская фильтрация по поисковому запросу (note). Не отправляем на бэк —
+    // поиск интерактивный, не хотим дёргать сервер на каждое нажатие клавиши.
+    const filteredTransactions = transactions
+      ? searchQuery.trim() === ''
+        ? transactions
+        : transactions.filter((tx) =>
+            (tx.note || '')
+              .toLowerCase()
+              .includes(searchQuery.trim().toLowerCase()),
+          )
+      : []
+
+    const totals = computeTotals(filteredTransactions)
 
     const deleteMutation = useMutation({
       mutationFn: (id: number) => deleteTransactionRequest(id),
@@ -74,7 +148,6 @@
           color: 'blue',
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
-        // Балансы откатились — обновляем кеш счетов тоже.
         queryClient.invalidateQueries({ queryKey: ['accounts'] })
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,6 +194,52 @@
           categories={categories}
         />
 
+        <TextInput
+          placeholder="Поиск по заметкам..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          mt="md"
+        />
+
+        {/* Сводка дохода/расхода по валютам. Показывается только когда есть
+            транзакции для подсчёта. Переводы в сводку не входят. */}
+        {filteredTransactions.length > 0 && totals.size > 0 && (
+          <Card withBorder p="md" mt="md" bg="gray.0">
+            <Stack gap="xs">
+              {Array.from(totals.entries()).map(([currency, { income, expense }]) => {
+                const net = income - expense
+                return (
+                  <Group key={currency} justify="space-between" wrap="wrap" gap="md">
+                    <Group gap="lg" wrap="wrap">
+                      <SummaryItem
+                        label="Доход"
+                        value={income}
+                        currency={currency}
+                        color="green"
+                        sign="+"
+                      />
+                      <SummaryItem
+                        label="Расход"
+                        value={expense}
+                        currency={currency}
+                        color="red"
+                        sign="−"
+                      />
+                    </Group>
+                    <SummaryItem
+                      label="Чистый"
+                      value={Math.abs(net)}
+                      currency={currency}
+                      color={net >= 0 ? 'green' : 'red'}
+                      sign={net >= 0 ? '+' : '−'}
+                    />
+                  </Group>
+                )
+              })}
+            </Stack>
+          </Card>
+        )}
+
         {isLoading && (
           <Container py="md">
             <Loader />
@@ -133,28 +252,41 @@
           </Text>
         )}
 
-        {transactions && transactions.length === 0 && (
+        {transactions && filteredTransactions.length === 0 && !isLoading && (
           <Card withBorder p="xl" mt="md">
             <Stack align="center" gap="xs">
-              <Text c="dimmed">Пока нет операций по выбранным фильтрам.</Text>
-              <Button variant="light" onClick={() => setModalOpened(true)}>
-                Добавить первую
-              </Button>
+              <Text c="dimmed">
+                {searchQuery.trim() !== ''
+                  ? `Ничего не найдено по запросу «${searchQuery}»`
+                  : 'Пока нет операций по выбранным фильтрам.'}
+              </Text>
+              {searchQuery.trim() === '' && (
+                <Button variant="light" onClick={() => setModalOpened(true)}>
+                  Добавить первую
+                </Button>
+              )}
             </Stack>
           </Card>
         )}
 
-        {transactions && transactions.length > 0 && (
-          <Stack gap="xs" mt="md">
-            {transactions.map((tx) => (
-              <TransactionCard
-                key={tx.id}
-                tx={tx}
-                accountById={accountById}
-                categoryById={categoryById}
-                onDelete={handleDelete}
-                deletingId={deleteMutation.variables}
-              />
+        {filteredTransactions.length > 0 && (
+          <Stack gap="lg" mt="md">
+            {groupByDate(filteredTransactions).map(([key, txs]) => (
+              <Stack key={key} gap="xs">
+                <Text fw={600} size="sm" c="dimmed">
+                  {formatDateHeader(key)}
+                </Text>
+                {txs.map((tx) => (
+                  <TransactionCard
+                    key={tx.id}
+                    tx={tx}
+                    accountById={accountById}
+                    categoryById={categoryById}
+                    onDelete={handleDelete}
+                    deletingId={deleteMutation.variables}
+                  />
+                ))}
+              </Stack>
             ))}
           </Stack>
         )}
@@ -164,6 +296,30 @@
           onClose={() => setModalOpened(false)}
         />
       </Container>
+    )
+  }
+
+  // ─── Сводка: один элемент (Доход/Расход/Чистый) ─────────────────────────
+
+  interface SummaryItemProps {
+    label: string
+    value: number
+    currency: string
+    color: string
+    sign: string
+  }
+
+  function SummaryItem({ label, value, currency, color, sign }: SummaryItemProps) {
+    return (
+      <Stack gap={0}>
+        <Text size="xs" c="dimmed">
+          {label}
+        </Text>
+        <Text fw={700} c={color}>
+          {sign}
+          {formatMoney(value, currency)}
+        </Text>
+      </Stack>
     )
   }
 
@@ -191,8 +347,6 @@
       : null
     const category = tx.category_id ? categoryById.get(tx.category_id) : null
 
-    // Строка под заголовком: для перевода — «Сбер карта → Тинькофф»,
-    // для дохода/расхода — «Сбер карта · Бакалея».
     const accountLine =
       tx.kind === 'transfer'
         ? `${fromAccount?.name ?? `#${tx.account_id}`} → ${
@@ -212,10 +366,11 @@
             <Text size="xs" c="dimmed" truncate>
               {accountLine}
             </Text>
+            {/* Только время — дата теперь в заголовке группы. */}
             <Text size="xs" c="dimmed">
-              {new Date(tx.occurred_at).toLocaleString('ru-RU', {
-                dateStyle: 'medium',
-                timeStyle: 'short',
+              {new Date(tx.occurred_at).toLocaleTimeString('ru-RU', {
+                hour: '2-digit',
+                minute: '2-digit',
               })}
             </Text>
           </Stack>
@@ -253,13 +408,99 @@
     categories: CategoryRead[]
   }
 
+  // Готовые периоды для shortcut-кнопок. Каждая функция возвращает {from, to}
+  // в локальной зоне юзера, чтобы фильтрация совпадала с его календарём.
+  const PERIOD_SHORTCUTS: Array<{
+    label: string
+    compute: () => { from: Date; to: Date }
+  }> = [
+    {
+      label: 'Сегодня',
+      compute: () => {
+        const now = new Date()
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const to = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+        )
+        return { from, to }
+      },
+    },
+    {
+      label: '7 дней',
+      compute: () => {
+        const now = new Date()
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
+        const to = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+        )
+        return { from, to }
+      },
+    },
+    {
+      label: 'Этот месяц',
+      compute: () => {
+        const now = new Date()
+        const from = new Date(now.getFullYear(), now.getMonth(), 1)
+        // День 0 следующего месяца = последний день текущего.
+        const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+        return { from, to }
+      },
+    },
+    {
+      label: 'Прошлый месяц',
+      compute: () => {
+        const now = new Date()
+        const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+        return { from, to }
+      },
+    },
+    {
+      label: 'Этот год',
+      compute: () => {
+        const now = new Date()
+        const from = new Date(now.getFullYear(), 0, 1)
+        const to = new Date(now.getFullYear(), 11, 31, 23, 59, 59)
+        return { from, to }
+      },
+    },
+  ]
+
+  // Локальный ISO формат "YYYY-MM-DDTHH:mm:ss" без таймзоны — совпадает с тем,
+  // что отдаёт DatePickerInput. Через toISOString() была бы UTC-строка с Z,
+  // и после смены часового пояса даты сдвинулись бы (на 3 часа в MSK).
+  function toLocalISO(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    )
+  }
+
+  // Локальный день в формате "YYYY-MM-DD" из ISO-строки. Нужен для сравнения
+  // активного периода с shortcut-ами — без учёта времени и таймзоны.
+  function toLocalDay(iso: string): string {
+    const d = new Date(iso)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  }
+
   function FilterPanel({
     filters,
     onChange,
     accounts,
     categories,
   }: FilterPanelProps) {
-    // Хелпер для immutable-обновления одного поля. undefined удаляет фильтр.
     function update<K extends keyof TransactionListFilters>(
       key: K,
       value: TransactionListFilters[K] | undefined,
@@ -273,6 +514,30 @@
       onChange(next)
     }
 
+    // Установить период (from + to) одним вызовом — для shortcut-чипов.
+    function applyPeriod(from: Date, to: Date) {
+      onChange({
+        ...filters,
+        from_date: toLocalISO(from),
+        to_date: toLocalISO(to),
+      })
+    }
+
+    // Какой shortcut сейчас «активен» — для подсветки соответствующего Chip.
+    // Сравниваем по локальному дню (YYYY-MM-DD), без секунд и таймзоны.
+    function getActiveShortcut(): string | null {
+      if (!filters.from_date || !filters.to_date) return null
+      const fromDay = toLocalDay(filters.from_date)
+      const toDay = toLocalDay(filters.to_date)
+      for (const p of PERIOD_SHORTCUTS) {
+        const { from, to } = p.compute()
+        if (toLocalDay(from.toISOString()) === fromDay && toLocalDay(to.toISOString()) === toDay) {
+          return p.label
+        }
+      }
+      return null
+    }
+
     const accountOptions = accounts.map((a) => ({
       value: String(a.id),
       label: a.name,
@@ -283,6 +548,7 @@
     }))
 
     const hasFilters = Object.keys(filters).length > 0
+    const activeShortcut = getActiveShortcut()
 
     return (
       <Card withBorder p="md">
@@ -331,6 +597,7 @@
               clearable
             />
           </Group>
+
           <Group grow align="flex-end">
             <DatePickerInput
               label="С даты"
@@ -350,7 +617,31 @@
               }
               clearable
             />
-            <Button variant="subtle" onClick={() => onChange({})} disabled={!hasFilters}>
+            <Select
+              label="Период"
+              placeholder="Все даты"
+              data={PERIOD_SHORTCUTS.map((p) => ({ value: p.label, label: p.label }))}
+              value={activeShortcut ?? null}
+              onChange={(label) => {
+                if (!label) {
+                  const next = { ...filters }
+                  delete next.from_date
+                  delete next.to_date
+                  onChange(next)
+                  return
+                }
+                const shortcut = PERIOD_SHORTCUTS.find((p) => p.label === label)
+                if (!shortcut) return
+                const { from, to } = shortcut.compute()
+                applyPeriod(from, to)
+              }}
+              clearable
+            />
+            <Button
+              variant="subtle"
+              onClick={() => onChange({})}
+              disabled={!hasFilters}
+            >
               Сбросить
             </Button>
           </Group>

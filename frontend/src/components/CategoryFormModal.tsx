@@ -10,6 +10,7 @@
     listCategoriesRequest,
     type CategoryRead,
   } from '../api/categories'
+  import { buildCategoryOptions } from '../lib/categoryTree'
 
   // Mantine Select хранит value как строку. parent_id из формы конвертируем
   // в number | null перед отправкой на бэк (см. mutationFn).
@@ -27,36 +28,6 @@
     // с объектом созданной категории. Используется, например, в форме
     // транзакции, чтобы автоматически выбрать только что созданную категорию.
     onCreated?: (category: CategoryRead) => void
-  }
-
-  // Строит данные для Select из плоского списка категорий: рекурсивно обходит
-  // дерево и формирует label с отступом по глубине (unicode-пробелы вместо
-  // HTML-индентов — Mantine Select не парсит JSX в label).
-  function buildCategoryOptions(
-    categories: CategoryRead[],
-  ): { value: string; label: string }[] {
-    const childrenMap = new Map<number | null, CategoryRead[]>()
-    for (const cat of categories) {
-      const arr = childrenMap.get(cat.parent_id) ?? []
-      arr.push(cat)
-      childrenMap.set(cat.parent_id, arr)
-    }
-    for (const arr of childrenMap.values()) {
-      arr.sort((a, b) => a.id - b.id)
-    }
-
-    const options: { value: string; label: string }[] = []
-    function walk(cat: CategoryRead, depth: number): void {
-      options.push({
-        value: String(cat.id),
-        // \u00A0 — неразрывный пробел, его HTML/Mantine не схлопывают в один.
-        label: '\u00A0\u00A0'.repeat(depth) + cat.name,
-      })
-      const children = childrenMap.get(cat.id) ?? []
-      for (const child of children) walk(child, depth + 1)
-    }
-    for (const root of childrenMap.get(null) ?? []) walk(root, 0)
-    return options
   }
 
   export function CategoryFormModal({ opened, onClose, onCreated }: Props) {
