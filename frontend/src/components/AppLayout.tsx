@@ -50,6 +50,7 @@
       { to: '/accounts', label: 'Счета', icon: '🏦' },
       { to: '/transactions', label: 'История', icon: '📝' },
       { to: '/categories', label: 'Категории', icon: '📂' },
+      { to: '/rates', label: 'Курсы валют', icon: '💱' },
       { to: '/me', label: 'Профиль', icon: '👤' },
     ]
 
