@@ -71,9 +71,9 @@
       queryFn: listAccountsRequest,
     })
     const { data: categories = [] } = useQuery({
-      queryKey: ['categories'],
-      queryFn: listCategoriesRequest,
-    })
+        queryKey: ['categories'],
+        queryFn: () => listCategoriesRequest(),
+      })
 
     const form = useForm<TransactionFormValues>({
       initialValues: {
@@ -89,18 +89,18 @@
       validate: zodResolver(transactionSchema),
     })
 
-    // При смене kind очищаем «несовместимые» поля. Например, переход с income
-    // на transfer обнуляет category_id (для перевода категории нет — иначе бэк
-    // вернёт 422 от model_validator схемы).
-    useEffect(() => {
-      if (form.values.kind === 'transfer') {
+     // При смене kind очищаем «несовместимые» поля:
+      // - category_id всегда — потому что категории разделены по kind
+      //   (после deepening category-feature: расходную нельзя для дохода).
+      // - transfer_account_id только когда не transfer.
+      useEffect(() => {
         form.setFieldValue('category_id', null)
-      } else {
-        form.setFieldValue('transfer_account_id', null)
-      }
-      // Не добавляем form в deps — это вызовет infinite loop. Реагируем только на kind.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [form.values.kind])
+        if (form.values.kind !== 'transfer') {
+          form.setFieldValue('transfer_account_id', null)
+        }
+        // Не добавляем form в deps — это вызовет infinite loop. Реагируем только на kind.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [form.values.kind])
 
     const createMutation = useMutation({
       mutationFn: (values: TransactionFormValues) =>
@@ -154,7 +154,12 @@
       value: String(a.id),
       label: `${a.name} (${a.currency_code})`,
     }))
-    const categoryOptions = buildCategoryOptions(categories)
+      // Категории фильтруются по типу операции: для расхода — только расходные,
+      // для дохода — только доходные. Для перевода Select категории скрыт.
+      const categoryOptions = buildCategoryOptions(
+        categories,
+        form.values.kind === 'transfer' ? undefined : form.values.kind,
+      )
 
     // Live-preview балансов: ищем выбранные счета по id и считаем «было → стало».
     // Если что-то не выбрано — соответствующие переменные останутся null и блок
@@ -306,13 +311,20 @@
             Portal с собственным z-index — корректно поверх родительской.
             После создания onCreated автоматически подставляет новую категорию
             в Select, экономя клик пользователю. */}
-        <CategoryFormModal
-          opened={categoryModalOpened}
-          onClose={() => setCategoryModalOpened(false)}
-          onCreated={(category) => {
-            form.setFieldValue('category_id', String(category.id))
-          }}
-        />
+          <CategoryFormModal
+            opened={categoryModalOpened}
+            onClose={() => setCategoryModalOpened(false)}
+            // Тип операции уже выбран в форме транзакции — фиксируем его
+            // в модалке категории, чтобы пользователь не мог создать,
+            // например, доходную категорию при выбранной операции «расход».
+            // Кнопка «Создать новую» вообще скрыта при kind='transfer',
+            // поэтому здесь всегда income или expense — приведение безопасное.
+            initialKind={form.values.kind as 'income' | 'expense'}
+            lockKind
+            onCreated={(category) => {
+              form.setFieldValue('category_id', String(category.id))
+            }}
+          />
       </Modal>
     )
   }

@@ -136,10 +136,10 @@
       queryKey: ['accounts'],
       queryFn: listAccountsRequest,
     })
-    const { data: categories = [] } = useQuery({
-      queryKey: ['categories'],
-      queryFn: listCategoriesRequest,
-    })
+     const { data: categories = [] } = useQuery({
+        queryKey: ['categories'],
+        queryFn: () => listCategoriesRequest(),
+      })
 
     const accountById = new Map(accounts.map((a) => [a.id, a]))
     const categoryById = new Map(categories.map((c) => [c.id, c]))
