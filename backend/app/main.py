@@ -14,6 +14,7 @@ from swagger_ui_bundle import swagger_ui_path
 from app.api.v1 import accounts as accounts_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import categories as categories_router
+from app.api.v1 import rates as rates_router
 from app.api.v1 import transactions as transactions_router
 from app.api.v1 import users as users_router
 from app.config import settings
@@ -75,6 +76,7 @@ app.include_router(users_router.router, prefix="/api/v1")
 app.include_router(accounts_router.router, prefix="/api/v1")
 app.include_router(categories_router.router, prefix="/api/v1")
 app.include_router(transactions_router.router, prefix="/api/v1")
+app.include_router(rates_router.router, prefix="/api/v1")
 
 
 @app.get(
