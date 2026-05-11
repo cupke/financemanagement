@@ -5,6 +5,7 @@
   import { MePage } from './pages/MePage'
   import { AccountsPage } from './pages/AccountsPage'
   import { CategoriesPage } from './pages/CategoriesPage'
+  import { RatesPage } from './pages/RatesPage'
   import { TransactionsPage } from './pages/TransactionsPage'
   import { ProtectedRoute } from './components/ProtectedRoute'
   import { AppLayout } from './components/AppLayout'
@@ -31,6 +32,7 @@
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/rates" element={<RatesPage />} />
             <Route path="/me" element={<MePage />} />
           </Route>
         </Route>
