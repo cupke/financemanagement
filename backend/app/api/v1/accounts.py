@@ -40,11 +40,13 @@ async def create_account(
       создать счёт другому юзеру.
       """
       account = Account(
-          owner_id=current_user.id,
-          name=payload.name,
-          balance=payload.balance,
-          currency_code=payload.currency_code.upper(),
-      )
+            owner_id=current_user.id,
+            name=payload.name,
+            kind=payload.kind,
+            note=payload.note,
+            balance=payload.balance,
+            currency_code=payload.currency_code.upper(),
+        )
       session.add(account)
       try:
           await session.commit()
