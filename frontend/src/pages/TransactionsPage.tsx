@@ -1,4 +1,4 @@
-  import { useState } from 'react'
+  import { useEffect, useState } from 'react'
   import {
     ActionIcon,
     Button,
@@ -103,7 +103,26 @@
 
   export function TransactionsPage() {
     const [modalOpened, setModalOpened] = useState(false)
-    const [filters, setFilters] = useState<TransactionListFilters>({})
+      // Фильтры сохраняются в sessionStorage — между переходами на другие
+      // страницы и обратно настройка не теряется. При запуске нового
+      // браузерного сеанса возвращается дефолт «Этот месяц».
+      const [filters, setFilters] = useState<TransactionListFilters>(() => {
+        const saved = sessionStorage.getItem(TX_FILTERS_STORAGE_KEY)
+        if (saved) {
+          try {
+            return JSON.parse(saved) as TransactionListFilters
+          } catch {
+            // повреждённое значение — игнорируем, идём в дефолт
+          }
+        }
+        return getDefaultFilters()
+      })
+
+      // Каждое изменение фильтров пишем в sessionStorage, чтобы при возврате
+      // на страницу (или открытии в новой вкладке того же сеанса) увидеть то же.
+      useEffect(() => {
+        sessionStorage.setItem(TX_FILTERS_STORAGE_KEY, JSON.stringify(filters))
+      }, [filters])
     // Локальный поиск по заметкам — фильтрация на клиенте без перезапроса.
     const [searchQuery, setSearchQuery] = useState('')
     const queryClient = useQueryClient()
@@ -206,6 +225,9 @@
         {filteredTransactions.length > 0 && totals.size > 0 && (
           <Card withBorder p="md" mt="md" bg="gray.0">
             <Stack gap="xs">
+              <Text size="sm" c="dimmed" fw={500}>
+                  Сводка · {formatPeriodLabel(filters)}
+                </Text>
               {Array.from(totals.entries()).map(([currency, { income, expense }]) => {
                 const net = income - expense
                 return (
@@ -227,7 +249,7 @@
                       />
                     </Group>
                     <SummaryItem
-                      label="Чистый"
+                      label="Итого"
                       value={Math.abs(net)}
                       currency={currency}
                       color={net >= 0 ? 'green' : 'red'}
@@ -494,6 +516,55 @@
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   }
+
+      // День в формате "1 мая 2026" из ключа "YYYY-MM-DD".
+    function formatLocalDay(dayKey: string): string {
+      const [y, m, d] = dayKey.split('-').map(Number)
+      return new Date(y, m - 1, d).toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    }
+
+    // Подпись к плашке сводки: «Этот месяц», «За всё время», или «1 — 7 мая 2026».
+    // Если диапазон from/to совпадает с одним из shortcut-периодов, используем его
+    // короткое название — так нагляднее, чем дата-дата.
+    function formatPeriodLabel(filters: TransactionListFilters): string {
+      if (!filters.from_date && !filters.to_date) return 'За всё время'
+      if (filters.from_date && filters.to_date) {
+        const fromDay = toLocalDay(filters.from_date)
+        const toDay = toLocalDay(filters.to_date)
+        for (const p of PERIOD_SHORTCUTS) {
+          const { from, to } = p.compute()
+          if (
+            toLocalDay(from.toISOString()) === fromDay &&
+            toLocalDay(to.toISOString()) === toDay
+          ) {
+            return p.label
+          }
+        }
+        return `${formatLocalDay(fromDay)} — ${formatLocalDay(toDay)}`
+      }
+      if (filters.from_date) return `с ${formatLocalDay(toLocalDay(filters.from_date))}`
+      return `по ${formatLocalDay(toLocalDay(filters.to_date!))}`
+    }
+
+        // Ключ в sessionStorage для фильтров истории. Префикс fintrack: на случай,
+    // если на этом домене когда-нибудь появятся другие приложения.
+    const TX_FILTERS_STORAGE_KEY = 'fintrack:tx-filters'
+
+    // Дефолт «Этот месяц» — выносим в отдельную функцию, чтобы переиспользовать
+    // в инициализаторе useState (при первом заходе без сохранённых фильтров).
+    function getDefaultFilters(): TransactionListFilters {
+      const now = new Date()
+      const from = new Date(now.getFullYear(), now.getMonth(), 1)
+      const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+      return {
+        from_date: toLocalISO(from),
+        to_date: toLocalISO(to),
+      }
+    }
 
   function FilterPanel({
     filters,
