@@ -51,3 +51,11 @@
     const { data } = await apiClient.get<UserRead>('/api/v1/users/me')
     return data
   }
+
+      // DELETE /api/v1/users/me → 204 No Content.
+    // Каскадно удаляет всё, что принадлежит пользователю (счета, категории,
+    // транзакции) через ON DELETE CASCADE в БД. После успешного вызова клиент
+    // должен очистить токен и редиректить на /login.
+    export async function deleteAccountRequest(): Promise<void> {
+      await apiClient.delete('/api/v1/users/me')
+    }
