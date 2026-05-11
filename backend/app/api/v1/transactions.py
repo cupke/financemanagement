@@ -47,15 +47,26 @@ async def create_transaction(
           payload.account_id, current_user, session
       )
 
-      # 2. Категория, если задана — обязательно наша. 400 (а не 404), потому
-      #    что это валидация входа, а не отсутствующий запрашиваемый ресурс.
+      # 2. Категория, если задана — обязательно наша, и её kind должен
+      #    совпадать с kind транзакции (расходную транзакцию нельзя отнести
+      #    к доходной категории). 400 (а не 404) — это валидация входа.
       if payload.category_id is not None:
-          category = await session.get(Category, payload.category_id)
-          if category is None or category.owner_id != current_user.id:
-              raise HTTPException(
-                  status_code=status.HTTP_400_BAD_REQUEST,
-                  detail="Категория не найдена",
-              )
+            category = await session.get(Category, payload.category_id)
+            if category is None or category.owner_id != current_user.id:
+                raise HTTPException( 
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Категория не найдена",
+                )
+            # Для transfer категория уже отвергается схемой и БД-CHECK'ом.
+            # Здесь явная проверка соответствия kind для income/expense.
+            if payload.kind in ("income", "expense") and category.kind != payload.kind:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Категория «{category.name}» предназначена для "
+                        f"{category.kind}, а операция — {payload.kind}."
+                    ),
+                )
 
       # 3. Для перевода — получатель обязательно наш; одновалютность.
       target: Account | None = None
