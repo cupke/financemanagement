@@ -29,6 +29,7 @@
     type TransactionRead,
   } from '../api/transactions'
   import { TransactionFormModal } from '../components/TransactionFormModal'
+  import { localToUtcIso, utcToLocalDay } from '../lib/datetime'
   import { formatMoney } from '../lib/format'
 
   // Метаданные для отображения — цвет, знак, человекочитаемая метка.
@@ -559,24 +560,10 @@
     },
   ]
 
-  // Локальный ISO формат "YYYY-MM-DDTHH:mm:ss" без таймзоны — совпадает с тем,
-  // что отдаёт DatePickerInput. Через toISOString() была бы UTC-строка с Z,
-  // и после смены часового пояса даты сдвинулись бы (на 3 часа в MSK).
-  function toLocalISO(d: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return (
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-      `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    )
-  }
-
-  // Локальный день в формате "YYYY-MM-DD" из ISO-строки. Нужен для сравнения
-  // активного периода с shortcut-ами — без учёта времени и таймзоны.
-  function toLocalDay(iso: string): string {
-    const d = new Date(iso)
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  }
+  // Локальный день в формате "YYYY-MM-DD" из UTC ISO. Нужен для сравнения
+  // активного периода с shortcut-ами и для отображения в DatePickerInput.
+  // Реализация в lib/datetime.ts; здесь короткий alias для читаемости.
+  const toLocalDay = utcToLocalDay
 
       // День в формате "1 мая 2026" из ключа "YYYY-MM-DD".
     function formatLocalDay(dayKey: string): string {
@@ -621,9 +608,13 @@
       const now = new Date()
       const from = new Date(now.getFullYear(), now.getMonth(), 1)
       const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+      // .toISOString() конвертирует local Date → UTC ISO с Z. Так бэк
+      // правильно сравнит с полями transactions.occurred_at (тоже UTC).
+      // Раньше тут было «оборачивание в local naive строку» — баг,
+      // который сдвигал период на величину таймзоны юзера.
       return {
-        from_date: toLocalISO(from),
-        to_date: toLocalISO(to),
+        from_date: from.toISOString(),
+        to_date: to.toISOString(),
       }
     }
 
@@ -650,8 +641,8 @@
     function applyPeriod(from: Date, to: Date) {
       onChange({
         ...filters,
-        from_date: toLocalISO(from),
-        to_date: toLocalISO(to),
+        from_date: from.toISOString(),
+        to_date: to.toISOString(),
       })
     }
 
@@ -731,21 +722,32 @@
           </Group>
 
           <Group grow align="flex-end">
+            {/* value/onChange проходят через UTC↔local конверсию:
+                - filters.* хранится в UTC ISO,
+                - DatePickerInput работает с локальным "YYYY-MM-DD".
+                Без конверсии юзер в МСК у границы суток видел бы «не тот» день
+                (например, 1 мая 00:00 МСК = 30 апр 21:00 UTC → отобразилось бы как 30 апр). */}
             <DatePickerInput
               label="С даты"
               placeholder="Все даты"
-              value={filters.from_date ? filters.from_date.slice(0, 10) : null}
+              value={filters.from_date ? utcToLocalDay(filters.from_date) : null}
               onChange={(val) =>
-                update('from_date', val ? `${val}T00:00:00` : undefined)
+                update(
+                  'from_date',
+                  val ? localToUtcIso(`${val}T00:00:00`) : undefined,
+                )
               }
               clearable
             />
             <DatePickerInput
               label="По дату"
               placeholder="Все даты"
-              value={filters.to_date ? filters.to_date.slice(0, 10) : null}
+              value={filters.to_date ? utcToLocalDay(filters.to_date) : null}
               onChange={(val) =>
-                update('to_date', val ? `${val}T23:59:59` : undefined)
+                update(
+                  'to_date',
+                  val ? localToUtcIso(`${val}T23:59:59`) : undefined,
+                )
               }
               clearable
             />

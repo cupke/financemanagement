@@ -27,6 +27,7 @@
     type TransactionRead,
   } from '../api/transactions'
   import { buildCategoryOptions } from '../lib/categoryTree'
+  import { localToUtcIso, utcToLocalIso } from '../lib/datetime'
   import { formatMoney } from '../lib/format'
   import { CategoryFormModal } from './CategoryFormModal'
 
@@ -82,7 +83,9 @@
         category_id: tx.category_id !== null ? String(tx.category_id) : null,
         transfer_account_id:
           tx.transfer_account_id !== null ? String(tx.transfer_account_id) : null,
-        occurred_at: tx.occurred_at,
+        // Бэк хранит в UTC, picker'у даём local — иначе юзер в МСК (+3)
+        // увидит время на 3 часа меньше («23:00 → 20:00»).
+        occurred_at: utcToLocalIso(tx.occurred_at),
         note: tx.note ?? '',
       }
     }
@@ -92,8 +95,9 @@
       amount: 0,
       category_id: null,
       transfer_account_id: null,
-      // ISO 8601 — Mantine 9 DateTimePicker работает со строками этого формата.
-      occurred_at: new Date().toISOString(),
+      // Picker'у даём текущий момент в local-формате (без таймзоны).
+      // При сабмите конвертируем обратно в UTC через localToUtcIso.
+      occurred_at: utcToLocalIso(new Date().toISOString()),
       note: '',
     }
   }
@@ -147,6 +151,10 @@
 
     const saveMutation = useMutation({
       mutationFn: (values: TransactionFormValues) => {
+        // Picker отдаёт naive local ISO ("2026-05-16T17:08:00") —
+        // конвертируем в UTC ISO с Z перед отправкой, чтобы бэк
+        // правильно понял момент времени независимо от таймзоны юзера.
+        const occurredAtUtc = localToUtcIso(values.occurred_at)
         if (transaction) {
           // PATCH: только безопасные поля. Сумма/счёт/тип/получатель не
           // передаём — бэк их и не примет в TransactionUpdate.
@@ -155,7 +163,7 @@
               values.category_id !== null && values.category_id !== ''
                 ? Number(values.category_id)
                 : null,
-            occurred_at: values.occurred_at,
+            occurred_at: occurredAtUtc,
             note: values.note || null,
           })
         }
@@ -172,7 +180,7 @@
             values.transfer_account_id !== ''
               ? Number(values.transfer_account_id)
               : null,
-          occurred_at: values.occurred_at,
+          occurred_at: occurredAtUtc,
           note: values.note || null,
         })
       },
