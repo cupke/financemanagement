@@ -5,9 +5,13 @@
 - Тестового юзера (по умолчанию seed@example.com / seedpass123).
 - 4 счёта разных типов и валют (Сбер карта, Тинькофф накопит., Наличные, USD карта).
 - Дерево категорий: 4 expense-категории с подкатегориями + 3 income.
-- ~23 транзакции последних 2 месяцев: доходы, расходы, переводы.
-  Часть из них — старше opening_date (30 дней назад), чтобы показать,
-  как они попадают в историю с бейджем «не в балансе» и НЕ двигают balance.
+- ~300 транзакций за последние 6 месяцев: регулярная зарплата 10-го числа,
+  аренда 5-го, ЖКХ 15-го, подписки + случайные продукты/кафе/такси/бензин
+  с реалистичной плотностью + 8 переводов между счетами. ~50 в текущем месяце
+  (двигают балансы) + ~250 старше opening_date (бейдж «не в балансе»).
+  Использует random.seed(42) — данные одинаковые при каждом запуске.
+
+  ~300 POST-запросов через API ≈ 10-15 секунд работы скрипта.
 
 Зачем: ручной ввод 4 счетов + 15 категорий + 25 транзакций — это полчаса
 кликов. Скрипт делает то же за 3 секунды и даёт воспроизводимый набор
@@ -27,6 +31,7 @@
 seed@example.com / seedpass123.
 """
 import argparse
+import random
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -245,58 +250,234 @@ def _create_category(client: httpx.Client, name: str, kind: str,
 
 # ─── Транзакции ───────────────────────────────────────────────────────────
 
-# Описание транзакций в виде списка dict'ов. days_ago = сколько дней назад
-# произошла операция (0 = сегодня; >30 = до opening_date → бейдж «не в балансе»).
-# transfer_to — имя счёта-получателя (только для kind='transfer').
-TRANSACTIONS = [
-    # === Recent (within opening_date — двигают balance) ===
-    # Income
-    {"kind": "income",   "from": "Сбер карта",       "cat": "Зарплата",  "amount": 85000, "days_ago": 1,  "note": "Зарплата за май"},
-    {"kind": "income",   "from": "Наличные",         "cat": "Подарки",   "amount": 5000,  "days_ago": 10, "note": "ДР"},
-    {"kind": "income",   "from": "Сбер карта",       "cat": "Фриланс",   "amount": 22000, "days_ago": 14, "note": "Сайт для клиента"},
-    # Expense — еда
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Продукты",  "amount": 3500,  "days_ago": 0,  "note": "Перекрёсток"},
-    {"kind": "expense",  "from": "Наличные",         "cat": "Продукты",  "amount": 1200,  "days_ago": 2,  "note": "Магнит у дома"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Кафе",      "amount": 850,   "days_ago": 3,  "note": "Кофейня"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Доставка",  "amount": 1800,  "days_ago": 5,  "note": "Яндекс.Еда"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Кафе",      "amount": 2100,  "days_ago": 7,  "note": "Ужин с друзьями"},
-    # Expense — транспорт
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Такси",     "amount": 450,   "days_ago": 1,  "note": None},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Такси",     "amount": 380,   "days_ago": 4,  "note": None},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Бензин",    "amount": 3200,  "days_ago": 12, "note": "Лукойл"},
-    # Expense — жильё / подписки
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "ЖКХ",       "amount": 4800,  "days_ago": 15, "note": "Коммуналка"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Подписки",  "amount": 299,   "days_ago": 8,  "note": "Spotify"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Подписки",  "amount": 599,   "days_ago": 8,  "note": "YouTube Premium"},
-    {"kind": "expense",  "from": "Наличные",         "cat": "Кино",      "amount": 800,   "days_ago": 11, "note": "Сеанс"},
-    # USD-карта
-    {"kind": "expense",  "from": "USD карта",        "cat": "Подписки",  "amount": 12,    "days_ago": 4,  "note": "Apple One"},
-    {"kind": "expense",  "from": "USD карта",        "cat": "Доставка",  "amount": 35,    "days_ago": 18, "note": "Amazon"},
-    # Переводы recent
-    {"kind": "transfer", "from": "Тинькофф накопит.", "cat": None,        "amount": 20000, "days_ago": 2,  "note": "Снял с накопит.", "transfer_to": "Сбер карта"},
-    {"kind": "transfer", "from": "Сбер карта",       "cat": None,        "amount": 5000,  "days_ago": 6,  "note": "Снятие наличных",  "transfer_to": "Наличные"},
+# Период истории. 180 дней = ~6 месяцев. Покрывает opening_date (30 дней назад)
+# и даёт значительный объём «ретро» (до opening_date) — хорошо тестирует
+# логику бейджа «не в балансе» и фильтров по периоду.
+HISTORY_DAYS = 180
 
-    # === Retro (старее opening_date — НЕ двигают balance, бейдж «не в балансе») ===
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Продукты",  "amount": 2400,  "days_ago": 45, "note": "Закупка апрель"},
-    {"kind": "expense",  "from": "Сбер карта",       "cat": "Аренда",    "amount": 35000, "days_ago": 50, "note": "Аренда апрель (ретро)"},
-    {"kind": "income",   "from": "Сбер карта",       "cat": "Зарплата",  "amount": 80000, "days_ago": 55, "note": "Зарплата апрель (ретро)"},
-    {"kind": "expense",  "from": "Наличные",         "cat": "Кафе",      "amount": 600,   "days_ago": 40, "note": "Старый кофе"},
-    {"kind": "transfer", "from": "Тинькофф накопит.", "cat": None,        "amount": 50000, "days_ago": 60, "note": "Старый перевод (ретро)", "transfer_to": "Сбер карта"},
-]
+# random.seed(42) — Hitchhiker's Guide reference + повторяемость данных.
+# При каждом запуске скрипта получаешь одинаковый набор транзакций.
+RANDOM_SEED = 42
+
+# Названия магазинов/мест для разнообразия заметок.
+GROCERY_STORES = ["Перекрёсток", "Магнит", "Пятёрочка", "Лента", "Вкусвилл", "Метро", None]
+CAFE_NOTES = ["Кофейня", "Бизнес-ланч", "Кофе на бегу", "Завтрак", "Ужин с друзьями", "Обед", None]
+TAXI_NOTES = [None, "Домой", "На работу", "В аэропорт", None, None]
+GAS_STATIONS = ["Лукойл", "Газпром", "Роснефть", "Shell"]
+DELIVERY_NOTES = ["Яндекс.Еда", "Самокат", "Озон Свежее", "Delivery Club", "Купер"]
+CINEMA_NOTES = ["Сеанс", "Премьера", "Фильм с друзьями"]
+FREELANCE_NOTES = ["Сайт для клиента", "Дизайн логотипа", "Консультация", "Доработка фичи", "Аудит кода"]
+GIFT_NOTES = ["ДР", "На праздник", "От родителей", "Юбилей"]
+RUS_MONTH_GEN = [None, "январь", "февраль", "март", "апрель", "май", "июнь",
+                 "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
+def generate_transactions(now: datetime) -> list[dict]:
+    """Сгенерировать ~120-150 транзакций за последние HISTORY_DAYS дней.
+
+    Состав:
+    - Регулярные ежемесячные: зарплата (10-е), аренда (5-е), ЖКХ (15-е),
+      Spotify + YouTube + Apple One (1-е и 3-е). Итого ~36 за 6 месяцев.
+    - Случайные ежедневные: продукты (3/неделю), кафе (2/неделю),
+      такси (3/неделю), бензин (1/неделю), доставка (1/неделю), кино
+      (раз в 2 недели). Вероятностно. Итого ~100 за 6 месяцев.
+    - Разовые: фриланс (5 за период), подарки (3), переводы (8).
+
+    Использует random.seed для воспроизводимости.
+    """
+    random.seed(RANDOM_SEED)
+    txs: list[dict] = []
+
+    # Идём от старой даты к новой — так транзакции в итоге будут в порядке
+    # возрастания времени (бэк сортирует по occurred_at, но человеку легче
+    # читать вывод в хронологии).
+    for d in range(HISTORY_DAYS, -1, -1):
+        date = now - timedelta(days=d)
+        is_today = (d == 0)
+
+        # === Регулярные ежемесячные операции ===
+        if date.day == 10 and not is_today:
+            # Зарплата 10-го, ±3000 для жизненности
+            txs.append({
+                "kind": "income", "from": "Сбер карта", "cat": "Зарплата",
+                "amount": random.randint(82000, 88000),
+                "occurred": date.replace(hour=11, minute=random.randint(0, 30)),
+                "note": f"Зарплата за {RUS_MONTH_GEN[date.month]}",
+            })
+        if date.day == 5 and not is_today:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Аренда",
+                "amount": 35000,
+                "occurred": date.replace(hour=14, minute=0),
+                "note": f"Аренда {RUS_MONTH_GEN[date.month]}",
+            })
+        if date.day == 15 and not is_today:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "ЖКХ",
+                "amount": random.randint(4500, 5400),
+                "occurred": date.replace(hour=18, minute=random.randint(0, 59)),
+                "note": "Коммуналка",
+            })
+        if date.day == 1 and not is_today:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Подписки",
+                "amount": 299,
+                "occurred": date.replace(hour=9, minute=0),
+                "note": "Spotify",
+            })
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Подписки",
+                "amount": 599,
+                "occurred": date.replace(hour=9, minute=1),
+                "note": "YouTube Premium",
+            })
+        if date.day == 3 and not is_today:
+            txs.append({
+                "kind": "expense", "from": "USD карта", "cat": "Подписки",
+                "amount": 12,
+                "occurred": date.replace(hour=10, minute=0),
+                "note": "Apple One",
+            })
+
+        # === Случайные дневные паттерны ===
+        # Продукты: вероятность ~0.43 в день → ~3 раза/нед → ~75 за 6 мес
+        if random.random() < 0.43:
+            txs.append({
+                "kind": "expense",
+                "from": random.choice(["Сбер карта", "Сбер карта", "Наличные"]),
+                "cat": "Продукты",
+                "amount": random.randint(500, 4500),
+                "occurred": _random_time(date, 9, 22),
+                "note": random.choice(GROCERY_STORES),
+            })
+
+        # Кафе: ~0.28 в день → ~2/нед
+        if random.random() < 0.28:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Кафе",
+                "amount": random.randint(350, 2500),
+                "occurred": _random_time(date, 8, 22),
+                "note": random.choice(CAFE_NOTES),
+            })
+
+        # Такси: ~0.4 в день → ~2.8/нед
+        if random.random() < 0.4:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Такси",
+                "amount": random.randint(250, 800),
+                "occurred": _random_time(date, 7, 23),
+                "note": random.choice(TAXI_NOTES),
+            })
+
+        # Бензин: ~0.15 в день → ~1/нед
+        if random.random() < 0.15:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Бензин",
+                "amount": random.randint(2800, 4200),
+                "occurred": _random_time(date, 8, 21),
+                "note": random.choice(GAS_STATIONS),
+            })
+
+        # Доставка еды: ~0.14 → ~1/нед
+        if random.random() < 0.14:
+            txs.append({
+                "kind": "expense", "from": "Сбер карта", "cat": "Доставка",
+                "amount": random.randint(800, 3500),
+                "occurred": _random_time(date, 12, 22),
+                "note": random.choice(DELIVERY_NOTES),
+            })
+
+        # Кино: ~0.07 → ~0.5/нед = 2 раза/мес
+        if random.random() < 0.07:
+            txs.append({
+                "kind": "expense",
+                "from": random.choice(["Сбер карта", "Наличные"]),
+                "cat": "Кино",
+                "amount": random.randint(600, 1500),
+                "occurred": _random_time(date, 17, 22),
+                "note": random.choice(CINEMA_NOTES),
+            })
+
+        # Фриланс-доход: ~0.025 → ~4-5 за полгода
+        if random.random() < 0.025:
+            txs.append({
+                "kind": "income", "from": "Сбер карта", "cat": "Фриланс",
+                "amount": random.randint(12000, 45000),
+                "occurred": _random_time(date, 14, 20),
+                "note": random.choice(FREELANCE_NOTES),
+            })
+
+        # Подарки/возвраты: ~0.015 → ~2-3 за полгода
+        if random.random() < 0.015:
+            txs.append({
+                "kind": "income",
+                "from": random.choice(["Сбер карта", "Наличные"]),
+                "cat": "Подарки",
+                "amount": random.randint(2000, 20000),
+                "occurred": _random_time(date, 12, 20),
+                "note": random.choice(GIFT_NOTES),
+            })
+
+        # USD-карта: иногда расходы за рубежом ~0.04 → ~1/нед
+        if random.random() < 0.04:
+            usd_cats = ["Подписки", "Доставка"]
+            txs.append({
+                "kind": "expense", "from": "USD карта",
+                "cat": random.choice(usd_cats),
+                "amount": random.randint(5, 80),
+                "occurred": _random_time(date, 10, 22),
+                "note": random.choice(["Amazon", "Steam", "GitHub", "AWS", None]),
+            })
+
+    # === Разовые: переводы между счетами ===
+    # 8 переводов на случайные дни в диапазоне 5..170 дней назад
+    transfer_days = sorted(random.sample(range(5, 170), 8))
+    for day_ago in transfer_days:
+        date = now - timedelta(days=day_ago)
+        # Большинство переводов с накопит. на карту (типичный сценарий),
+        # пару раз в обратную (откладываем)
+        if random.random() < 0.7:
+            src, dst, note = "Тинькофф накопит.", "Сбер карта", "Снял с накопит."
+        else:
+            src, dst, note = "Сбер карта", "Тинькофф накопит.", "Отложил"
+        txs.append({
+            "kind": "transfer", "from": src, "cat": None,
+            "amount": random.randint(5, 50) * 1000,  # 5000..50000, круглые
+            "occurred": _random_time(date, 10, 20),
+            "note": note,
+            "transfer_to": dst,
+        })
+
+    return txs
+
+
+def _random_time(date: datetime, hour_from: int, hour_to: int) -> datetime:
+    """Заменить время в datetime на случайное в диапазоне часов.
+
+    Берём UTC-момент, заменяем h/m/s — таймзону не трогаем (бэк хранит TIMESTAMPTZ).
+    """
+    return date.replace(
+        hour=random.randint(hour_from, hour_to),
+        minute=random.randint(0, 59),
+        second=random.randint(0, 59),
+        microsecond=0,
+    )
 
 
 def create_transactions(client: httpx.Client, accounts: dict[str, dict],
                         categories: dict[str, dict]) -> tuple[int, int]:
-    """Создаёт транзакции из TRANSACTIONS. Возвращает (recent_count, retro_count)."""
-    recent = retro = 0
+    """POST'нуть все сгенерированные транзакции. Возвращает (recent, retro)."""
     now = datetime.now(timezone.utc)
-    for tx in TRANSACTIONS:
-        occurred = now - timedelta(days=tx["days_ago"])
+    txs = generate_transactions(now)
+    recent = retro = 0
+    print(f"   Сгенерировано {len(txs)} транзакций за {HISTORY_DAYS} дней. Отправляю...")
+
+    for i, tx in enumerate(txs, start=1):
         body = {
             "kind": tx["kind"],
             "account_id": accounts[tx["from"]]["id"],
             "amount": tx["amount"],
-            "occurred_at": occurred.isoformat(),
+            "occurred_at": tx["occurred"].isoformat(),
             "note": tx.get("note"),
         }
         if tx["cat"] is not None:
@@ -310,19 +491,16 @@ def create_transactions(client: httpx.Client, accounts: dict[str, dict],
                   f"HTTP {r.status_code}: {r.text}")
             sys.exit(1)
 
-        # Понять, retro или recent — по тому же критерию, что бэк.
-        is_retro = tx["days_ago"] > OPENING_DATE_DAYS_AGO
-        if is_retro:
+        # Retro = до opening_date.
+        days_ago = (now - tx["occurred"]).days
+        if days_ago > OPENING_DATE_DAYS_AGO:
             retro += 1
-            tag = "ретро"
         else:
             recent += 1
-            tag = "      "
 
-        # Симметричное отображение: тип, тэг, сумма, заметка.
-        note_str = f" — {tx['note']}" if tx.get("note") else ""
-        print(f"   {tag} {tx['kind']:8s} {tx['amount']:>6} "
-              f"{tx['from']:22s}{note_str}")
+        # Прогресс каждые 25 транзакций, чтобы не спамить вывод.
+        if i % 25 == 0:
+            print(f"   ... {i}/{len(txs)}")
 
     return recent, retro
 
