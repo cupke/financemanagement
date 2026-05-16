@@ -1,6 +1,7 @@
   import { useEffect, useState } from 'react'
   import {
     ActionIcon,
+    Badge,
     Button,
     Card,
     Container,
@@ -11,6 +12,7 @@
     Text,
     TextInput,
     Title,
+    Tooltip,
   } from '@mantine/core'
   import { DatePickerInput } from '@mantine/dates'
   import { modals } from '@mantine/modals'
@@ -103,6 +105,11 @@
 
   export function TransactionsPage() {
     const [modalOpened, setModalOpened] = useState(false)
+      // editingTx === null → модалка в режиме «создать новую» (или закрыта).
+      // editingTx === TransactionRead → модалка в режиме «редактировать».
+      // Хранятся отдельно от modalOpened, чтобы после закрытия плавно очистить
+      // (иначе на исчезающей модалке моргнул бы режим «создать»).
+      const [editingTx, setEditingTx] = useState<TransactionRead | null>(null)
       // Фильтры сохраняются в sessionStorage — между переходами на другие
       // страницы и обратно настройка не теряется. При запуске нового
       // браузерного сеанса возвращается дефолт «Этот месяц».
@@ -180,6 +187,24 @@
       },
     })
 
+    const handleEdit = (tx: TransactionRead) => {
+      setEditingTx(tx)
+      setModalOpened(true)
+    }
+
+    const handleCreate = () => {
+      setEditingTx(null)
+      setModalOpened(true)
+    }
+
+    const handleModalClose = () => {
+      setModalOpened(false)
+      // Сбрасываем editingTx с задержкой, чтобы при закрытии модалки её
+      // содержимое не моргнуло из «редактирования» в «создание» во время
+      // анимации закрытия.
+      setTimeout(() => setEditingTx(null), 200)
+    }
+
     const handleDelete = (tx: TransactionRead) => {
       modals.openConfirmModal({
         title: 'Удалить операцию?',
@@ -201,7 +226,7 @@
       <Container size="md" py="xl">
         <Group justify="space-between" mb="lg">
           <Title order={2}>История операций</Title>
-          <Button onClick={() => setModalOpened(true)}>
+          <Button onClick={handleCreate}>
             + Добавить операцию
           </Button>
         </Group>
@@ -283,7 +308,7 @@
                   : 'Пока нет операций по выбранным фильтрам.'}
               </Text>
               {searchQuery.trim() === '' && (
-                <Button variant="light" onClick={() => setModalOpened(true)}>
+                <Button variant="light" onClick={handleCreate}>
                   Добавить первую
                 </Button>
               )}
@@ -304,6 +329,7 @@
                     tx={tx}
                     accountById={accountById}
                     categoryById={categoryById}
+                    onEdit={handleEdit}
                     onDelete={handleDelete}
                     deletingId={deleteMutation.variables}
                   />
@@ -315,7 +341,8 @@
 
         <TransactionFormModal
           opened={modalOpened}
-          onClose={() => setModalOpened(false)}
+          onClose={handleModalClose}
+          transaction={editingTx}
         />
       </Container>
     )
@@ -351,6 +378,7 @@
     tx: TransactionRead
     accountById: Map<number, AccountRead>
     categoryById: Map<number, CategoryRead>
+    onEdit: (tx: TransactionRead) => void
     onDelete: (tx: TransactionRead) => void
     deletingId: number | undefined
   }
@@ -359,6 +387,7 @@
     tx,
     accountById,
     categoryById,
+    onEdit,
     onDelete,
     deletingId,
   }: CardProps) {
@@ -378,13 +407,38 @@
             category ? ` · ${category.name}` : ''
           }`
 
+    // Транзакция «не влияет на баланс», если её дата раньше opening_date
+    // ХОТЯ БЫ ОДНОГО из затронутых счетов (источник, а для перевода — ещё
+    // и получатель). Это объясняет пользователю, почему сумма видна,
+    // но balance счёта не сдвинулся. См. vkr/02_design.md.
+    const txDate = new Date(tx.occurred_at)
+    const beforeSourceOpening =
+      fromAccount && txDate < new Date(fromAccount.opening_date)
+    const beforeTargetOpening =
+      toAccount && txDate < new Date(toAccount.opening_date)
+    const notAffectingBalance = beforeSourceOpening || beforeTargetOpening
+
     return (
       <Card withBorder p="md">
         <Group justify="space-between" wrap="nowrap" align="flex-start">
           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-            <Text fw={500} truncate>
-              {tx.note || meta.label}
-            </Text>
+            <Group gap="xs" wrap="nowrap">
+              <Text fw={500} truncate>
+                {tx.note || meta.label}
+              </Text>
+              {notAffectingBalance && (
+                <Tooltip
+                  label="Дата операции раньше «даты остатка» счёта — её эффект уже учтён в начальном остатке"
+                  multiline
+                  w={260}
+                  withArrow
+                >
+                  <Badge size="xs" color="gray" variant="light">
+                    не в балансе
+                  </Badge>
+                </Tooltip>
+              )}
+            </Group>
             <Text size="xs" c="dimmed" truncate>
               {accountLine}
             </Text>
@@ -408,12 +462,19 @@
             </Stack>
             <ActionIcon
               variant="subtle"
+              aria-label="Редактировать операцию"
+              onClick={() => onEdit(tx)}
+            >
+              ✏️
+            </ActionIcon>
+            <ActionIcon
+              variant="subtle"
               color="red"
               aria-label="Удалить операцию"
               onClick={() => onDelete(tx)}
               loading={deletingId === tx.id}
             >
-              🗑️ 
+              🗑️
             </ActionIcon>
           </Group>
         </Group>

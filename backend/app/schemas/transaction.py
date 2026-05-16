@@ -10,6 +10,28 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 TransactionKind = Literal["income", "expense", "transfer"]
 
 
+class TransactionUpdate(BaseModel):
+        """Тело запроса PATCH /transactions/{id}.
+
+        Сознательное ограничение MVP: PATCH правит ТОЛЬКО поля, не влияющие
+        на балансы счетов — category_id, occurred_at, note. Изменение суммы,
+        счёта, типа или счёта-получателя — через DELETE + POST новой операции
+        (см. docstring модуля app.api.v1.transactions). Это исключает целый
+        класс багов «рассинхрон баланса и истории».
+
+        Все поля опциональны. Семантика:
+        - поле НЕ передано в JSON   → не обновляем (старое значение остаётся);
+        - поле передано как null    → обнуляем (например, снять категорию);
+        - поле передано со значением → обновляем.
+
+        Различение «не передано» и «передано null» — через model_fields_set
+        в эндпоинте. Pydantic по умолчанию не различает эти случаи в значении
+        атрибута (и там, и там получится None).
+        """
+        category_id: int | None = None
+        occurred_at: datetime | None = None
+        note: str | None = Field(default=None, max_length=500)
+
 class TransactionCreate(BaseModel):
       """Тело запроса POST /transactions.
 
