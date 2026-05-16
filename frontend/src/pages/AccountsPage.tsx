@@ -1,4 +1,4 @@
-    import { useState } from 'react'
+    import { useMemo, useState } from 'react'
     import {
       ActionIcon,
       Button,
@@ -19,6 +19,7 @@
       listAccountsRequest,
       type AccountRead,
     } from '../api/accounts'
+    import { listRatesRequest } from '../api/rates'
     import { AccountFormModal } from '../components/AccountFormModal'
     import { ACCOUNT_KIND_META, formatMoney, pluralRu } from '../lib/format'
 
@@ -33,6 +34,28 @@
         queryKey: ['accounts'],
         queryFn: listAccountsRequest,
       })
+
+      // Курсы ЦБ — нужны для сводки «общий капитал в рублях».
+      // Грузим параллельно со счетами; если не загрузились — просто не
+      // покажем эквивалент в RUB (graceful degradation, остальное работает).
+      const { data: ratesData } = useQuery({
+        queryKey: ['rates'],
+        queryFn: listRatesRequest,
+      })
+
+      // Map char_code → курс к рублю (за 1 единицу). RUB = 1 захардкожен:
+      // CBR не публикует «курс RUB к RUB», но он по определению единичный.
+      // useMemo здесь обязателен ДО любых early-return (rules of hooks).
+      const rateByCode = useMemo(() => {
+        const map = new Map<string, number>()
+        map.set('RUB', 1)
+        if (ratesData) {
+          for (const r of ratesData.items) {
+            map.set(r.char_code, Number(r.vunit_rate))
+          }
+        }
+        return map
+      }, [ratesData])
 
       const deleteMutation = useMutation({
         mutationFn: (id: number) => deleteAccountRequest(id),
@@ -108,6 +131,33 @@
         return acc
       }, {})
 
+      // Эквивалент в RUB считаем только если есть НЕ-RUB счёт (иначе строка
+      // дублирует RUB-сумму выше) и для всех валют известен курс. Если у юзера
+      // есть какая-то экзотическая валюта без курса от ЦБ — честнее не показать,
+      // чем показать заниженную сумму.
+      const nonRubCurrencies = Object.keys(totalsByCurrency).filter(
+        (c) => c !== 'RUB',
+      )
+      let totalInRub: number | null = null
+      if (nonRubCurrencies.length > 0 && ratesData) {
+        let sum = 0
+        let allKnown = true
+        for (const [code, total] of Object.entries(totalsByCurrency)) {
+          const rate = rateByCode.get(code)
+          if (rate === undefined) {
+            allKnown = false
+            break
+          }
+          sum += total * rate
+        }
+        if (allKnown) totalInRub = sum
+      }
+
+      // «DD.MM.YYYY» из «YYYY-MM-DD» — самый компактный формат для подписи.
+      const rateDateLabel = ratesData
+        ? ratesData.rate_date.split('-').reverse().join('.')
+        : null
+
       return (
         <Container size="md" py="xl">
           <Group justify="space-between" mb="lg">
@@ -129,6 +179,13 @@
                     </Text>
                   ))}
                 </Group>
+                {/* Эквивалент в RUB — только при наличии валютных счетов
+                    и загруженных курсов. См. логику totalInRub выше. */}
+                {totalInRub !== null && rateDateLabel && (
+                  <Text size="sm" c="dimmed">
+                    ≈ {formatMoney(totalInRub, 'RUB')} по курсу ЦБ на {rateDateLabel}
+                  </Text>
+                )}
               </Stack>
             </Card>
           )}

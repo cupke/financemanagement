@@ -1,5 +1,6 @@
     import { useEffect } from 'react'
     import {
+      Alert,
       Button,
       Modal,
       NumberInput,
@@ -8,6 +9,7 @@
       Textarea,
       TextInput,
     } from '@mantine/core'
+    import { DateTimePicker } from '@mantine/dates'
     import { useForm } from '@mantine/form'
     import { zodResolver } from 'mantine-form-zod-resolver'
     import { notifications } from '@mantine/notifications'
@@ -22,11 +24,16 @@
     import { ACCOUNT_KIND_OPTIONS, COMMON_CURRENCIES } from '../lib/format'
 
     // Zod-схема. Одна и та же для create и edit — поля идентичны.
+    // Поле balance в форме называется opening_balance — оно отправляется
+    // на бэк как opening_balance, а current balance вычисляется бэком.
     const accountSchema = z.object({
       name: z.string().min(1, 'Введите название').max(100, 'Максимум 100 символов'),
       kind: z.enum(['card', 'cash', 'savings', 'credit', 'e_wallet', 'other']),
       note: z.string().max(500, 'Максимум 500 символов').nullable(),
-      balance: z.number().refine((v) => Number.isFinite(v), 'Введите число'),
+      opening_balance: z
+        .number()
+        .refine((v) => Number.isFinite(v), 'Введите число'),
+      opening_date: z.string().min(1, 'Выберите дату'),
       currency_code: z.string().length(3, 'Код валюты — 3 символа'),
     })
 
@@ -45,11 +52,16 @@
     // в useEffect для синхронизации при смене editingAccount.
     function getInitialValues(account: AccountRead | null | undefined): AccountFormValues {
       if (account) {
+        // В режиме edit показываем текущее opening_balance (то, что юзер
+        // ввёл при создании), НЕ current balance. Иначе пользователь
+        // подумал бы, что меняет «то, что сейчас», но фактически менял бы
+        // отправную точку — и после пересчёта balance уехал бы.
         return {
           name: account.name,
           kind: account.kind,
           note: account.note ?? '',
-          balance: Number(account.balance),
+          opening_balance: Number(account.opening_balance),
+          opening_date: account.opening_date,
           currency_code: account.currency_code,
         }
       }
@@ -57,7 +69,9 @@
         name: '',
         kind: 'card',
         note: '',
-        balance: 0,
+        opening_balance: 0,
+        // ISO 8601 — Mantine DateTimePicker работает с этим форматом.
+        opening_date: new Date().toISOString(),
         currency_code: 'RUB',
       }
     }
@@ -88,7 +102,8 @@
             kind: values.kind,
             // Пустая строка → null (не хранить пустые заметки в БД).
             note: values.note?.trim() ? values.note.trim() : null,
-            balance: values.balance,
+            opening_balance: values.opening_balance,
+            opening_date: values.opening_date,
             currency_code: values.currency_code,
           }
           return account
@@ -141,6 +156,25 @@
         >
           <form onSubmit={form.onSubmit((values) => saveMutation.mutate(values))}>
             <Stack>
+              {/* Объясняем суть полей «снимок + дата», иначе пользователь
+                  не поймёт, почему вводит «сейчас» а не «начальный» и зачем дата.
+                  В режиме edit предупреждаем про пересчёт. */}
+              {isEditing ? (
+                <Alert color="orange" variant="light">
+                  Изменение остатка или его даты пересчитает текущий баланс
+                  по всем операциям счёта. Это безопасно, но проверь, что
+                  значения соответствуют реальности.
+                </Alert>
+              ) : (
+                <Alert color="blue" variant="light">
+                  Введи сумму, которая на счету <strong>прямо сейчас</strong>
+                  {' '}(посмотри в банк-приложении). Дальше любая операция
+                  с датой после &laquo;даты остатка&raquo; будет менять текущий
+                  баланс. Операции «задним числом» с датой раньше — останутся
+                  в истории, но баланс не тронут (они уже учтены в твоём остатке).
+                </Alert>
+              )}
+
               <TextInput
                 label="Название"
                 placeholder="Например, Сбер карта"
@@ -165,16 +199,27 @@
                 {...form.getInputProps('note')}
               />
               <NumberInput
-                label={isEditing ? 'Баланс' : 'Начальный баланс'}
+                label={isEditing ? 'Остаток на дату ниже' : 'Сколько на счету сейчас'}
                 description={
                   isEditing
-                    ? 'Корректировать вручную осторожно — обычно меняется через транзакции'
-                    : 'Сколько денег уже на счету сейчас'
+                    ? 'Снимок состояния. От него + транзакций считается текущий баланс.'
+                    : 'Открой банк-приложение и введи ту сумму'
                 }
                 decimalScale={2}
                 fixedDecimalScale
                 allowNegative={false}
-                {...form.getInputProps('balance')}
+                {...form.getInputProps('opening_balance')}
+              />
+              <DateTimePicker
+                label="Дата остатка"
+                description={
+                  isEditing
+                    ? 'Дата, на которую указан остаток выше'
+                    : 'Обычно — сегодня. Операции после этой даты будут менять баланс.'
+                }
+                valueFormat="DD.MM.YYYY HH:mm"
+                required
+                {...form.getInputProps('opening_date')}
               />
               <Select
                 label="Валюта"

@@ -21,8 +21,14 @@
       // null — у счёта нет заметки. На фронте показываем заметку,
       // только если она не null и не пустая строка.
       note: string | null
+      // opening_balance — снимок состояния на opening_date (то, что юзер
+      // ввёл при создании счёта или поправил позже). balance — производный
+      // current: opening_balance + Σ(транзакции с occurred_at >= opening_date).
+      // Подробнее — в vkr/02_design.md, раздел про модель «opening + движения».
       // Numeric(15,2) на бэке сериализуется в строку через json — это норма для
       // финансовых сумм (избежать потерь точности float). Парсим в Number при отображении.
+      opening_balance: string
+      opening_date: string
       balance: string
       currency_code: string
       created_at: string
@@ -33,7 +39,12 @@
       name: string
       kind?: AccountKind
       note?: string | null
-      balance?: number
+      // «Сколько на счету на opening_date» — обычно равно «сколько прямо сейчас
+      // в банке». Все будущие транзакции с occurred_at >= opening_date будут
+      // наращивать balance поверх этого значения.
+      opening_balance?: number
+      // ISO 8601. Если не передано — бэк подставит datetime.now(timezone.utc).
+      opening_date?: string
       currency_code?: string
     }
 
@@ -41,7 +52,10 @@
       name?: string
       kind?: AccountKind
       note?: string | null
-      balance?: number
+      // Изменение opening_balance или opening_date вызывает на бэке
+      // полный пересчёт current balance по всем транзакциям счёта.
+      opening_balance?: number
+      opening_date?: string
       currency_code?: string
     }
 

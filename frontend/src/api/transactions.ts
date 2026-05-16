@@ -32,6 +32,17 @@
     note?: string | null
   }
 
+
+    // PATCH /api/v1/transactions/{id}. На бэке частичный апдейт: правятся
+    // только поля, не влияющие на балансы (category_id, occurred_at, note).
+    // Остальное — через DELETE + POST. См. docstring модуля transactions.py
+    // на бэке и заметку 2026-05-16 в vkr/03_implementation.md.
+  export interface TransactionUpdate {
+    category_id?: number | null
+    occurred_at?: string
+    note?: string | null
+  }
+
   export interface TransactionListFilters {
     account_id?: number
     category_id?: number
@@ -81,6 +92,19 @@
     return data
   }
 
+      // PATCH /api/v1/transactions/{id}. Балансы НЕ меняются — только
+    // безопасные поля. См. TransactionUpdate выше.
+    export async function updateTransactionRequest(
+      id: number,
+      payload: TransactionUpdate,
+    ): Promise<TransactionRead> {
+      const { data } = await apiClient.patch<TransactionRead>(
+        `/api/v1/transactions/${id}`,
+        payload,
+      )
+      return data
+    }
+    
   // DELETE /api/v1/transactions/{id} → 204. На бэке зеркально откатывает
   // эффект транзакции на балансах (для перевода — на обоих счетах).
   export async function deleteTransactionRequest(id: number): Promise<void> {

@@ -1,5 +1,6 @@
   import { useEffect, useState } from 'react'
   import {
+    Alert,
     Button,
     Card,
     Group,
@@ -20,7 +21,11 @@
 
   import { listAccountsRequest, type AccountRead } from '../api/accounts'
   import { listCategoriesRequest } from '../api/categories'
-  import { createTransactionRequest } from '../api/transactions'
+  import {
+    createTransactionRequest,
+    updateTransactionRequest,
+    type TransactionRead,
+  } from '../api/transactions'
   import { buildCategoryOptions } from '../lib/categoryTree'
   import { formatMoney } from '../lib/format'
   import { CategoryFormModal } from './CategoryFormModal'
@@ -57,10 +62,45 @@
   interface Props {
     opened: boolean
     onClose: () => void
+    // Если передан — режим редактирования. Правятся только «безопасные» поля
+    // (категория, дата, заметка); сумма/счёт/тип/получатель заблокированы.
+    // Чтобы поменять заблокированные поля — удалить операцию и создать новую
+    // (см. docstring модуля transactions.py на бэке).
+    transaction?: TransactionRead | null
   }
 
-  export function TransactionFormModal({ opened, onClose }: Props) {
+  // Начальные значения формы. Выносим из компонента, чтобы переиспользовать
+  // в useEffect для синхронизации при смене editing-транзакции.
+  function getInitialValues(
+    tx: TransactionRead | null | undefined,
+  ): TransactionFormValues {
+    if (tx) {
+      return {
+        kind: tx.kind,
+        account_id: String(tx.account_id),
+        amount: Number(tx.amount),
+        category_id: tx.category_id !== null ? String(tx.category_id) : null,
+        transfer_account_id:
+          tx.transfer_account_id !== null ? String(tx.transfer_account_id) : null,
+        occurred_at: tx.occurred_at,
+        note: tx.note ?? '',
+      }
+    }
+    return {
+      kind: 'expense',
+      account_id: '',
+      amount: 0,
+      category_id: null,
+      transfer_account_id: null,
+      // ISO 8601 — Mantine 9 DateTimePicker работает со строками этого формата.
+      occurred_at: new Date().toISOString(),
+      note: '',
+    }
+  }
+
+  export function TransactionFormModal({ opened, onClose, transaction }: Props) {
     const queryClient = useQueryClient()
+    const isEditing = !!transaction
     // Локальный state для вложенной модалки создания категории. Открывается
     // из ссылки под Select-ом категории. Не путать с opened-prop'ом самой
     // транзакционной модалки — это два независимых уровня.
@@ -71,29 +111,32 @@
       queryFn: listAccountsRequest,
     })
     const { data: categories = [] } = useQuery({
-        queryKey: ['categories'],
-        queryFn: () => listCategoriesRequest(),
-      })
+      queryKey: ['categories'],
+      queryFn: () => listCategoriesRequest(),
+    })
 
     const form = useForm<TransactionFormValues>({
-      initialValues: {
-        kind: 'expense',
-        account_id: '',
-        amount: 0,
-        category_id: null,
-        transfer_account_id: null,
-        // ISO 8601 — Mantine 9 DateTimePicker работает со строками этого формата.
-        occurred_at: new Date().toISOString(),
-        note: '',
-      },
+      initialValues: getInitialValues(transaction),
       validate: zodResolver(transactionSchema),
     })
 
-     // При смене kind очищаем «несовместимые» поля:
+    // При открытии модалки с другой операцией (или переход create → edit)
+    // подтягиваем актуальные значения. Зависим только от transaction?.id и opened,
+    // чтобы не перезаписывать форму на каждом ререндере родителя.
+    useEffect(() => {
+      if (opened) {
+        form.setValues(getInitialValues(transaction))
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [opened, transaction?.id])
+
+     // При смене kind очищаем «несовместимые» поля. В режиме редактирования
+      // kind заблокирован — этот эффект на edit-сценарий не сработает.
       // - category_id всегда — потому что категории разделены по kind
       //   (после deepening category-feature: расходную нельзя для дохода).
       // - transfer_account_id только когда не transfer.
       useEffect(() => {
+        if (isEditing) return
         form.setFieldValue('category_id', null)
         if (form.values.kind !== 'transfer') {
           form.setFieldValue('transfer_account_id', null)
@@ -102,9 +145,21 @@
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [form.values.kind])
 
-    const createMutation = useMutation({
-      mutationFn: (values: TransactionFormValues) =>
-        createTransactionRequest({
+    const saveMutation = useMutation({
+      mutationFn: (values: TransactionFormValues) => {
+        if (transaction) {
+          // PATCH: только безопасные поля. Сумма/счёт/тип/получатель не
+          // передаём — бэк их и не примет в TransactionUpdate.
+          return updateTransactionRequest(transaction.id, {
+            category_id:
+              values.category_id !== null && values.category_id !== ''
+                ? Number(values.category_id)
+                : null,
+            occurred_at: values.occurred_at,
+            note: values.note || null,
+          })
+        }
+        return createTransactionRequest({
           kind: values.kind,
           account_id: Number(values.account_id),
           amount: values.amount,
@@ -119,17 +174,23 @@
               : null,
           occurred_at: values.occurred_at,
           note: values.note || null,
-        }),
+        })
+      },
       onSuccess: () => {
         notifications.show({
-          title: 'Операция добавлена',
-          message: 'Балансы счетов обновлены',
+          title: isEditing ? 'Операция обновлена' : 'Операция добавлена',
+          message: isEditing
+            ? 'Изменения сохранены. Балансы не затронуты.'
+            : 'Балансы счетов обновлены',
           color: 'green',
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
-        // КРИТИЧЕСКАЯ строка: балансы счетов изменились на бэке — нужно
-        // перезапросить /accounts, иначе страница счетов покажет старые суммы.
-        queryClient.invalidateQueries({ queryKey: ['accounts'] })
+        // При CREATE балансы изменились на бэке — нужно перезапросить
+        // /accounts, иначе страница счетов покажет старые суммы. При PATCH
+        // балансы не трогаются, но invalidate безвреден (просто лишний GET).
+        if (!isEditing) {
+          queryClient.invalidateQueries({ queryKey: ['accounts'] })
+        }
         form.reset()
         onClose()
       },
@@ -141,7 +202,9 @@
             ? raw
             : Array.isArray(raw)
               ? raw.map((e) => e.msg).join('; ')
-              : 'Не удалось создать операцию'
+              : isEditing
+                ? 'Не удалось сохранить операцию'
+                : 'Не удалось создать операцию'
         notifications.show({
           title: 'Ошибка',
           message,
@@ -163,7 +226,8 @@
 
     // Live-preview балансов: ищем выбранные счета по id и считаем «было → стало».
     // Если что-то не выбрано — соответствующие переменные останутся null и блок
-    // превью просто не отрендерится.
+    // превью просто не отрендерится. В режиме редактирования превью скрыто:
+    // PATCH не меняет балансы, поэтому «было → стало» бессмысленно.
     const sourceAccount =
       accounts.find((a) => String(a.id) === form.values.account_id) ?? null
     const targetAccount =
@@ -171,6 +235,23 @@
         (a) => String(a.id) === (form.values.transfer_account_id ?? ''),
       ) ?? null
     const amount = Number(form.values.amount) || 0
+
+    // Проверка «не повлияет на баланс»: дата операции раньше opening_date
+    // хотя бы одного из затронутых счетов. Та же логика, что на бэке
+    // (_apply_signed_delta_to_account) и в бейдже на странице истории.
+    // Делает превью «было → стало» нерелевантным — заменяем его Alert'ом.
+    const txDate = form.values.occurred_at
+      ? new Date(form.values.occurred_at)
+      : null
+    const sourceUnaffected =
+      sourceAccount && txDate && txDate < new Date(sourceAccount.opening_date)
+    const targetUnaffected =
+      targetAccount && txDate && txDate < new Date(targetAccount.opening_date)
+    const isTransfer = form.values.kind === 'transfer'
+    // Для income/expense смотрим только на источник. Для transfer — на оба.
+    const willNotAffectBalance = isTransfer
+      ? sourceUnaffected || targetUnaffected
+      : sourceUnaffected
 
     function sourceBalanceAfter(): number | null {
       if (!sourceAccount || amount <= 0) return null
@@ -195,12 +276,23 @@
       <Modal
         opened={opened}
         onClose={handleClose}
-        title="Новая операция"
+        title={isEditing ? 'Редактирование операции' : 'Новая операция'}
         centered
         size="md"
       >
-        <form onSubmit={form.onSubmit((values) => createMutation.mutate(values))}>
+        <form onSubmit={form.onSubmit((values) => saveMutation.mutate(values))}>
           <Stack>
+            {/* В режиме редактирования объясняем, почему часть полей заблокирована.
+                Это критично для UX: иначе пользователь будет думать «почему я не
+                могу поменять сумму?» и решит, что приложение сломано. */}
+            {isEditing && (
+              <Alert color="blue" variant="light">
+                Здесь можно поправить категорию, дату и заметку. Сумму, счёт
+                и тип менять нельзя — для этого удалите операцию и создайте
+                новую. Так гарантируется консистентность балансов.
+              </Alert>
+            )}
+
             <SegmentedControl
               fullWidth
               data={[
@@ -208,6 +300,7 @@
                 { label: '💸 Расход', value: 'expense' },
                 { label: '🔁 Между счетами', value: 'transfer' },
               ]}
+              disabled={isEditing}
               {...form.getInputProps('kind')}
             />
 
@@ -218,6 +311,7 @@
               required
               searchable
               allowDeselect={false}
+              disabled={isEditing}
               {...form.getInputProps('account_id')}
             />
 
@@ -233,6 +327,7 @@
                 required
                 searchable
                 allowDeselect={false}
+                disabled={isEditing}
                 {...form.getInputProps('transfer_account_id')}
               />
             )}
@@ -244,24 +339,36 @@
               allowNegative={false}
               min={0.01}
               required
+              disabled={isEditing}
               {...form.getInputProps('amount')}
             />
 
-            {/* Live-preview балансов. Показывается только когда счёт выбран
-                и amount > 0 — иначе превью бессмысленно. Подсказывает
-                пользователю результат до подтверждения операции. */}
-            {sourceAccount && amount > 0 && (
-              <BalancePreview
-                source={sourceAccount}
-                sourceAfter={sourceBalanceAfter()}
-                target={targetAccount}
-                targetAfter={targetBalanceAfter()}
-                isTransfer={form.values.kind === 'transfer'}
-              />
+            {/* Live-preview балансов. Показывается только в режиме создания
+                (PATCH не меняет балансы) и когда счёт выбран + amount > 0.
+                Если дата операции раньше opening_date счёта — заменяем
+                превью «было → стало» на Alert, потому что в эту операцию
+                balance не входит (см. модель «opening_balance + движения»). */}
+            {!isEditing && sourceAccount && amount > 0 && (
+              willNotAffectBalance ? (
+                <Alert color="gray" variant="light">
+                  Дата операции раньше «даты остатка» счёта&nbsp;—
+                  баланс не изменится. Операция сохранится в истории
+                  с пометкой «не в балансе».
+                </Alert>
+              ) : (
+                <BalancePreview
+                  source={sourceAccount}
+                  sourceAfter={sourceBalanceAfter()}
+                  target={targetAccount}
+                  targetAfter={targetBalanceAfter()}
+                  isTransfer={form.values.kind === 'transfer'}
+                />
+              )
             )}
 
             {/* Условное поле: категория — для income/expense, не для transfer.
-                Под Select — ссылка для создания новой категории не выходя из формы. */}
+                Под Select — ссылка для создания новой категории не выходя из формы.
+                В режиме редактирования категория ПРАВИТСЯ (это «безопасное» поле). */}
             {form.values.kind !== 'transfer' && (
               <Stack gap={4}>
                 <Select
@@ -285,7 +392,11 @@
 
             <DateTimePicker
               label="Когда"
-              description="По умолчанию — текущий момент"
+              description={
+                isEditing
+                  ? 'Дата правится — это не влияет на балансы счетов'
+                  : 'По умолчанию — текущий момент'
+              }
               valueFormat="DD.MM.YYYY HH:mm"
               required
               {...form.getInputProps('occurred_at')}
@@ -301,8 +412,8 @@
               {...form.getInputProps('note')}
             />
 
-            <Button type="submit" loading={createMutation.isPending}>
-              Добавить операцию
+            <Button type="submit" loading={saveMutation.isPending}>
+              {isEditing ? 'Сохранить' : 'Добавить операцию'}
             </Button>
           </Stack>
         </form>

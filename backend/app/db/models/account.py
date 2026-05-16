@@ -65,7 +65,31 @@ class Account(Base):
       # «дом», и т.п. Опциональна; 500 символов — достаточно для бытовых описаний.
       note: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-      # Текущий баланс. Numeric(15, 2) = до 13 цифр перед запятой и 2 после.
+      # Начальный остаток на opening_date — снимок состояния, который
+      # пользователь ввёл при создании счёта (или поправил вручную позже).
+      # Все транзакции с occurred_at >= opening_date накапливаются поверх него,
+      # давая current balance. Транзакции «до opening_date» в balance не входят
+      # — их эффект уже учтён в opening_balance. См. vkr/02_design.md.
+      opening_balance: Mapped[Decimal] = mapped_column(
+          Numeric(15, 2), nullable=False, server_default="0"
+      )
+
+      # Дата снимка opening_balance. По умолчанию — момент создания счёта.
+      # Юзер может ввести любую дату (например, «1 января 2026» для импорта
+      # исторических данных), но обычно это сегодня.
+      opening_date: Mapped[datetime] = mapped_column(
+          DateTime(timezone=True),
+          nullable=False,
+          server_default=func.now(),
+      )
+
+      # Текущий баланс — КЕШ производного значения
+      # (opening_balance + Σ signed_amount транзакций с occurred_at >= opening_date).
+      # Поддерживается в актуальном состоянии при изменениях транзакций
+      # и opening_balance/opening_date — см. helper recompute_account_balance
+      # в backend/app/api/v1/accounts.py.
+      # Зачем кеш, а не SUM на лету: страница /accounts читает balance каждый
+      # раз и должна быть быстрой; SUM по сотням транзакций — лишняя нагрузка.
       balance: Mapped[Decimal] = mapped_column(
           Numeric(15, 2), nullable=False, server_default="0"
       )
