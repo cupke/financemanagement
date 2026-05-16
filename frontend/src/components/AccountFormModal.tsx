@@ -21,6 +21,7 @@
       updateAccountRequest,
       type AccountRead,
     } from '../api/accounts'
+    import { localToUtcIso, utcToLocalIso } from '../lib/datetime'
     import { ACCOUNT_KIND_OPTIONS, COMMON_CURRENCIES } from '../lib/format'
 
     // Zod-схема. Одна и та же для create и edit — поля идентичны.
@@ -61,7 +62,9 @@
           kind: account.kind,
           note: account.note ?? '',
           opening_balance: Number(account.opening_balance),
-          opening_date: account.opening_date,
+          // Бэк хранит UTC, picker'у нужен local — иначе юзер видел бы
+          // сдвинутое на таймзону время «даты остатка».
+          opening_date: utcToLocalIso(account.opening_date),
           currency_code: account.currency_code,
         }
       }
@@ -70,8 +73,9 @@
         kind: 'card',
         note: '',
         opening_balance: 0,
-        // ISO 8601 — Mantine DateTimePicker работает с этим форматом.
-        opening_date: new Date().toISOString(),
+        // Текущий момент в local-формате. При сабмите конвертируется
+        // в UTC через localToUtcIso.
+        opening_date: utcToLocalIso(new Date().toISOString()),
         currency_code: 'RUB',
       }
     }
@@ -103,7 +107,9 @@
             // Пустая строка → null (не хранить пустые заметки в БД).
             note: values.note?.trim() ? values.note.trim() : null,
             opening_balance: values.opening_balance,
-            opening_date: values.opening_date,
+            // Picker отдаёт naive local ISO — конвертируем в UTC ISO с Z,
+            // чтобы бэк правильно понял момент времени независимо от таймзоны.
+            opening_date: localToUtcIso(values.opening_date),
             currency_code: values.currency_code,
           }
           return account
