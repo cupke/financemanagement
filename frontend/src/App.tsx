@@ -9,6 +9,7 @@
   import { TransactionsPage } from './pages/TransactionsPage'
   import { ProtectedRoute } from './components/ProtectedRoute'
   import { AppLayout } from './components/AppLayout'
+  import { BudgetsPage } from './pages/BudgetsPage'
 
   // Корневой компонент приложения — задаёт карту маршрутов.
   // React Router сопоставляет URL в адресной строке с одним из <Route> и рендерит его element.
@@ -32,6 +33,7 @@
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/budgets" element={<BudgetsPage />} />
             <Route path="/rates" element={<RatesPage />} />
             <Route path="/me" element={<MePage />} />
           </Route>
