@@ -26,6 +26,7 @@ import {
 } from '../api/budgets'
 import { BudgetFormModal } from '../components/BudgetFormModal'
 import { formatMoney } from '../lib/format'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 // Цвета прогресс-бара по статусу. Совпадают с бэк-статусами: ok=green,
 // warning=yellow, exceeded=red.
@@ -110,6 +111,7 @@ function BudgetCard({ budget, onEdit, onDelete, deletingId }: BudgetCardProps) {
 }
 
 export function BudgetsPage() {
+  useDocumentTitle('Бюджеты')
   const queryClient = useQueryClient()
   const [modalOpened, setModalOpened] = useState(false)
   const [editingBudget, setEditingBudget] = useState<BudgetWithProgress | null>(null)

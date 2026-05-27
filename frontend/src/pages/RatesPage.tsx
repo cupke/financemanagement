@@ -12,6 +12,7 @@
     import { useQuery } from '@tanstack/react-query'
 
     import { listRatesRequest } from '../api/rates'
+    import { useDocumentTitle } from '../lib/useDocumentTitle'
 
     // Форматирование курса с 4 знаками после запятой и разделителем тысяч ("74,2963").
     const rateFormatter = new Intl.NumberFormat('ru-RU', {
@@ -37,6 +38,7 @@
     // кеш в памяти браузера + автодедупликация запросов при возврате на страницу.
     // Бэкенд тоже кеширует курсы в БД на день (cache-aside).
     export function RatesPage() {
+      useDocumentTitle('Курсы валют')
       const { data, isLoading, isError, error } = useQuery({
         queryKey: ['rates'],
         queryFn: listRatesRequest,

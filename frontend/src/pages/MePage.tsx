@@ -20,6 +20,7 @@
     import { listTransactionsRequest } from '../api/transactions'
     import { formatMoney, pluralRu } from '../lib/format'
     import { useAuthStore } from '../stores/auth'
+    import { useDocumentTitle } from '../lib/useDocumentTitle'
 
     // Расширенная страница профиля. Состоит из трёх секций:
     // 1. Hero — аватар с инициалом + email + точная дата регистрации + Выйти.
@@ -30,6 +31,7 @@
     // CategoriesPage, TransactionsPage — благодаря TanStack Query это переиспользует
     // кеш без дополнительных сетевых запросов.
     export function MePage() {
+      useDocumentTitle('Профиль')
       const navigate = useNavigate()
       const clearToken = useAuthStore((state) => state.clearToken)
       const queryClient = useQueryClient()

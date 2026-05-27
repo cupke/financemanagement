@@ -18,6 +18,7 @@ import { listTransactionsRequest } from '../api/transactions'
 import { listAccountsRequest } from '../api/accounts'
 import { listCategoriesRequest } from '../api/categories'
 import { listBudgetsRequest } from '../api/budgets'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 const RUB = new Intl.NumberFormat('ru-RU', {
   style: 'currency',
@@ -43,6 +44,7 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 export function DashboardPage() {
+  useDocumentTitle('Главная')
   const now = new Date()
   const monthLabel = `${MONTH_NAMES[now.getMonth() + 1]} ${now.getFullYear()}`
 

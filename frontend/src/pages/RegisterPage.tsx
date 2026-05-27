@@ -17,6 +17,7 @@
 
   import { loginRequest, registerRequest } from '../api/auth'
   import { useAuthStore } from '../stores/auth'
+  import { useDocumentTitle } from '../lib/useDocumentTitle'
 
   // Та же логика «двойной валидации», что и в LoginPage. Минимум 8 символов
   // пароля повторяет ограничение из Pydantic-схемы UserCreate на бэке.
@@ -31,6 +32,7 @@
   type RegisterFormValues = z.infer<typeof registerSchema>
 
   export function RegisterPage() {
+    useDocumentTitle('Регистрация')
     const navigate = useNavigate()
     const setToken = useAuthStore((state) => state.setToken)
 

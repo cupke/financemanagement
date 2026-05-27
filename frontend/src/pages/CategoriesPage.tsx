@@ -23,6 +23,7 @@
       type CategoryRead,
     } from '../api/categories'
     import { CategoryFormModal } from '../components/CategoryFormModal'
+    import { useDocumentTitle } from '../lib/useDocumentTitle'
   
     // Каждый уровень вложенности = 24px отступа слева.
     const INDENT_PX = 24
@@ -189,6 +190,7 @@
     }
 
     export function CategoriesPage() {
+      useDocumentTitle('Категории')
       const [modalOpened, setModalOpened] = useState(false)
       // Текущая вкладка — определяет, с каким kind открывается форма создания.
       const [activeKind, setActiveKind] = useState<CategoryKind>('expense')

@@ -32,6 +32,7 @@
   import { TransactionFormModal } from '../components/TransactionFormModal'
   import { localToUtcIso, utcToLocalDay } from '../lib/datetime'
   import { formatMoney } from '../lib/format'
+  import { useDocumentTitle } from '../lib/useDocumentTitle'
 
   // Метаданные для отображения — цвет, знак, человекочитаемая метка.
   const KIND_META: Record<
@@ -106,6 +107,7 @@
   }
 
   export function TransactionsPage() {
+    useDocumentTitle('История операций')
     const [modalOpened, setModalOpened] = useState(false)
       // editingTx === null → модалка в режиме «создать новую» (или закрыта).
       // editingTx === TransactionRead → модалка в режиме «редактировать».
@@ -226,6 +228,11 @@
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
+        notifications.show({
+        title: 'Готово',
+       message: 'CSV скачан',
+      color: 'green',
+      })
       } catch {
         notifications.show({
           title: 'Ошибка',

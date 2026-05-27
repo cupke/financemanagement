@@ -17,6 +17,7 @@ import { Link, useNavigate } from 'react-router-dom'
 
   import { loginRequest } from '../api/auth'
   import { useAuthStore } from '../stores/auth'
+  import { useDocumentTitle } from '../lib/useDocumentTitle'
 
   // Zod-схема валидации формы. На бэке Pydantic делает то же самое строже —
   // принцип «валидируем дважды»: клиент для UX (мгновенная реакция),
@@ -29,6 +30,7 @@ import { Link, useNavigate } from 'react-router-dom'
   type LoginFormValues = z.infer<typeof loginSchema>
 
   export function LoginPage() {
+    useDocumentTitle('Вход')
     const navigate = useNavigate()
     // Берём из стора только нужное действие — Zustand перерисовывает компонент
     // только при изменении того, что мы запрашиваем. Подписка на весь стор

@@ -22,9 +22,11 @@
     import { listRatesRequest } from '../api/rates'
     import { AccountFormModal } from '../components/AccountFormModal'
     import { ACCOUNT_KIND_META, formatMoney, pluralRu } from '../lib/format'
+    import { useDocumentTitle } from '../lib/useDocumentTitle'
 
     // Главная страница после логина: список счетов с балансами и кнопка добавления.
     export function AccountsPage() {
+      useDocumentTitle('Счета')
       const [modalOpened, setModalOpened] = useState(false)
       // Если null — режим создания. Если AccountRead — редактирование того счёта.
       const [editingAccount, setEditingAccount] = useState<AccountRead | null>(null)
