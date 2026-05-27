@@ -1,5 +1,6 @@
   import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
   import {
+    ActionIcon,
     AppShell,
     Burger,
     Group,
@@ -7,7 +8,9 @@
     Stack,
     Text,
     Title,
+    Tooltip,
     UnstyledButton,
+    useMantineColorScheme,
   } from '@mantine/core'
   import { useDisclosure } from '@mantine/hooks'
   import { notifications } from '@mantine/notifications'
@@ -27,6 +30,8 @@
     // useDisclosure — Mantine-хук для пары {opened, toggle/close/open}. Здесь
     // управляет видимостью sidebar на мобильных.
     const [opened, { toggle, close }] = useDisclosure()
+    // Mantine сам хранит выбор темы в localStorage и применяет на каждой загрузке.
+    const { colorScheme, toggleColorScheme } = useMantineColorScheme()
 
     // Email текущего юзера — показываем в правой части header. queryKey совпадает
     // с тем, что использует /me и axios-интерсептор; данные кешированы.
@@ -50,7 +55,6 @@
       { to: '/accounts', label: 'Счета', icon: '🏦' },
       { to: '/transactions', label: 'История', icon: '📝' },
       { to: '/categories', label: 'Категории', icon: '📂' },
-      { to: '/budgets', label: 'Бюджеты', icon: '🎯' },
       { to: '/rates', label: 'Курсы валют', icon: '💱' },
       { to: '/me', label: 'Профиль', icon: '👤' },
     ]
@@ -87,11 +91,24 @@
             </Group>
             {/* Email юзера в header — показывает, в чьём аккаунте сидишь.
                 Пока useQuery загружается — пусто, не дёргаемся placeholder'ом. */}
-            {user && (
-              <Text size="sm" c="dimmed" truncate>
-                {user.email}
-              </Text>
-            )}
+            <Group gap="sm">
+              {user && (
+                <Text size="sm" c="dimmed" truncate>
+                  {user.email}
+                </Text>
+              )}
+              <Tooltip
+                label={colorScheme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              >
+                <ActionIcon
+                  variant="default"
+                  onClick={toggleColorScheme}
+                  aria-label="Переключить тему"
+                >
+                  {colorScheme === 'dark' ? '☀️' : '🌙'}
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           </Group>
         </AppShell.Header>
 

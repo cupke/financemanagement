@@ -291,7 +291,7 @@
         {/* Сводка дохода/расхода по валютам. Показывается только когда есть
             транзакции для подсчёта. Переводы в сводку не входят. */}
         {filteredTransactions.length > 0 && totals.size > 0 && (
-          <Card withBorder p="md" mt="md" bg="gray.0">
+          <Card withBorder p="md" mt="md" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
             <Stack gap="xs">
               <Text size="sm" c="dimmed" fw={500}>
                   Сводка · {formatPeriodLabel(filters)}

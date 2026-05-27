@@ -41,7 +41,7 @@
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <MantineProvider theme={theme}>
+      <MantineProvider theme={theme} defaultColorScheme="auto">
         {/* ModalsProvider — глобальная очередь модалок. После этого в любом
             месте кода можно вызвать modals.openConfirmModal({...}) — не нужно
             создавать свой компонент-обёртку для каждого подтверждения. */}

@@ -166,7 +166,7 @@
           </Group>
 
           {accounts.length > 0 && (
-            <Card withBorder p="md" mb="lg" bg="gray.0">
+            <Card withBorder p="md" mb="lg" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
               <Stack gap={4}>
                 <Text size="sm" c="dimmed">
                   Общий капитал · {accounts.length}{' '}
