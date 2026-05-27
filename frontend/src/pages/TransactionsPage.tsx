@@ -19,6 +19,7 @@
   import { notifications } from '@mantine/notifications'
   import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+  import { apiClient } from '../api/client'
   import { listAccountsRequest, type AccountRead } from '../api/accounts'
   import { listCategoriesRequest, type CategoryRead } from '../api/categories'
   import {
@@ -198,6 +199,42 @@
       setModalOpened(true)
     }
 
+    const handleExportCsv = async () => {
+      try {
+        // Передаём бэку те же фильтры, что применены на странице —
+        // экспортируется ровно то, что юзер сейчас видит. limit/offset
+        // выкидываем: пагинация в экспорт не нужна, нужны все совпадающие строки.
+        const exportParams = Object.fromEntries(
+          Object.entries(filters).filter(
+            ([k, v]) =>
+              k !== 'limit' &&
+              k !== 'offset' &&
+              v !== undefined &&
+              v !== null &&
+              v !== '',
+          ),
+        )
+        const response = await apiClient.get('/api/v1/export/transactions.csv', {
+          params: exportParams,
+          responseType: 'blob',
+        })
+        const url = window.URL.createObjectURL(new Blob([response.data]))
+        const link = document.createElement('a')
+        link.href = url
+        link.setAttribute('download', 'fintrack-transactions.csv')
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      } catch {
+        notifications.show({
+          title: 'Ошибка',
+          message: 'Не удалось скачать CSV',
+          color: 'red',
+        })
+      }
+    }
+
     const handleModalClose = () => {
       setModalOpened(false)
       // Сбрасываем editingTx с задержкой, чтобы при закрытии модалки её
@@ -227,9 +264,14 @@
       <Container size="md" py="xl">
         <Group justify="space-between" mb="lg">
           <Title order={2}>История операций</Title>
-          <Button onClick={handleCreate}>
-            + Добавить операцию
-          </Button>
+          <Group gap="xs">
+            <Button variant="light" onClick={handleExportCsv}>
+              Экспорт CSV
+            </Button>
+            <Button onClick={handleCreate}>
+              + Добавить операцию
+            </Button>
+          </Group>
         </Group>
 
         <FilterPanel

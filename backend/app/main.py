@@ -18,6 +18,7 @@ from app.api.v1 import categories as categories_router
 from app.api.v1 import rates as rates_router
 from app.api.v1 import transactions as transactions_router
 from app.api.v1 import users as users_router
+from app.api.v1 import export as export_router
 from app.config import settings
 from app.db.session import get_session
 
@@ -78,6 +79,7 @@ app.include_router(accounts_router.router, prefix="/api/v1")
 app.include_router(categories_router.router, prefix="/api/v1")
 app.include_router(transactions_router.router, prefix="/api/v1")
 app.include_router(rates_router.router, prefix="/api/v1")
+app.include_router(export_router.router, prefix="/api/v1")
 app.include_router(budgets_router.router, prefix="/api/v1")
 
 
