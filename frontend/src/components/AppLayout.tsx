@@ -57,6 +57,7 @@
       { to: '/transactions', label: 'История', icon: '📝' },
       { to: '/categories', label: 'Категории', icon: '📂' },
       { to: '/budgets', label: 'Бюджеты', icon: '💰' },
+      { to: '/reports', label: 'Отчёты', icon: '📈' },
       { to: '/rates', label: 'Курсы валют', icon: '💱' },
       { to: '/me', label: 'Профиль', icon: '👤' },
     ]
