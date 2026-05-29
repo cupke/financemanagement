@@ -58,6 +58,7 @@
             // 'dashboard-summary' (под 'dashboard' ничего не кэшируется).
             queryClient.invalidateQueries({ queryKey: ['accounts'] })
             queryClient.invalidateQueries({ queryKey: ['transactions'] })
+            queryClient.invalidateQueries({ queryKey: ['transactions-stats'] })
             queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
             queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
             queryClient.invalidateQueries({ queryKey: ['budgets'] })

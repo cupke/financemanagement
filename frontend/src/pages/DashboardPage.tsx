@@ -188,9 +188,19 @@ export function DashboardPage() {
                 const kind = KIND_LABEL[tx.kind] ?? { label: tx.kind, color: 'gray' }
                 const account = accountById.get(tx.account_id)
                 const category = tx.category_id ? categoryById.get(tx.category_id) : null
-                // Под названием категории показываем счёт — единообразно для всех,
-                // и сразу видно, откуда списано / на что приходило.
-                const detail = account?.name || ''
+                const targetAccount = tx.transfer_account_id
+                  ? accountById.get(tx.transfer_account_id)
+                  : null
+                // Заголовок и подпись. Для перевода — «Источник → Получатель»
+                // без подписи. Для дохода/расхода — категория (если есть) сверху
+                // и счёт снизу; счёт в подписи показываем только когда сверху
+                // стоит категория, иначе была бы дублирующая строка.
+                const primaryText =
+                  tx.kind === 'transfer'
+                    ? `${account?.name ?? '—'} → ${targetAccount?.name ?? '—'}`
+                    : category?.name || account?.name || '—'
+                const detail =
+                  tx.kind === 'transfer' || !category ? '' : account?.name || ''
                 const dateStr = new Date(tx.occurred_at).toLocaleDateString('ru-RU', {
                   day: 'numeric',
                   month: 'short',
@@ -203,7 +213,7 @@ export function DashboardPage() {
                       </Badge>
                       <Stack gap={0} style={{ minWidth: 0 }}>
                         <Text size="sm" truncate>
-                          {category?.name || account?.name || '—'}
+                          {primaryText}
                         </Text>
                         {detail && (
                           <Text size="xs" c="dimmed" truncate>

@@ -210,6 +210,13 @@
             color: 'blue',
           })
           queryClient.invalidateQueries({ queryKey: ['categories'] })
+          // Удаление категории каскадит подкатегории и обнуляет category_id у
+          // операций → меняются разбивки по категориям и бюджет на эту
+          // категорию. Обновляем зависимые виджеты.
+          queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+          queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+          queryClient.invalidateQueries({ queryKey: ['budgets'] })
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onError: (error: any) => {

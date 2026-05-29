@@ -71,6 +71,7 @@
           // Удаление счёта каскадом сносит его операции → обновляем всё
           // производное: история, дашборд, отчёты, бюджеты.
           queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          queryClient.invalidateQueries({ queryKey: ['transactions-stats'] })
           queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
           queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
           queryClient.invalidateQueries({ queryKey: ['budgets'] })

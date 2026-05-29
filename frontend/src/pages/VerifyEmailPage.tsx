@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   Anchor,
@@ -18,6 +19,7 @@ type Status = 'pending' | 'success' | 'error'
 
 export function VerifyEmailPage() {
   useDocumentTitle('Подтверждение почты')
+  const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token')
   const [status, setStatus] = useState<Status>('pending')
@@ -33,8 +35,14 @@ export function VerifyEmailPage() {
       return
     }
     verifyEmailRequest(token)
-      .then(() => setStatus('success'))
+      .then(() => {
+        setStatus('success')
+        // Если пользователь уже залогинен — обновляем профиль, чтобы бейдж
+        // «почта не подтверждена» и баннер сразу исчезли.
+        queryClient.invalidateQueries({ queryKey: ['me'] })
+      })
       .catch(() => setStatus('error'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   return (

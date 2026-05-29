@@ -29,14 +29,23 @@ import {
   type RecurringTransactionRead,
 } from '../api/recurring'
 import { RecurringFormModal } from '../components/RecurringFormModal'
-import { formatMoney } from '../lib/format'
+import { formatMoney, pluralRu } from '../lib/format'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
-const FREQUENCY_LABEL: Record<RecurrenceFrequency, string> = {
-  daily: 'день',
-  weekly: 'неделю',
-  monthly: 'месяц',
-  yearly: 'год',
+// «каждый день / каждую неделю / каждый месяц / каждый год» — для интервала 1.
+const EVERY_SINGULAR: Record<RecurrenceFrequency, string> = {
+  daily: 'каждый день',
+  weekly: 'каждую неделю',
+  monthly: 'каждый месяц',
+  yearly: 'каждый год',
+}
+
+// Формы единицы для склонения с числом (1 / 2-4 / 5+): «2 недели», «5 недель».
+const UNIT_FORMS: Record<RecurrenceFrequency, [string, string, string]> = {
+  daily: ['день', 'дня', 'дней'],
+  weekly: ['неделю', 'недели', 'недель'],
+  monthly: ['месяц', 'месяца', 'месяцев'],
+  yearly: ['год', 'года', 'лет'],
 }
 
 const KIND_META: Record<RecurringKind, { label: string; emoji: string; color: string }> = {
@@ -45,11 +54,12 @@ const KIND_META: Record<RecurringKind, { label: string; emoji: string; color: st
   transfer: { label: 'Перевод', emoji: '🔁', color: 'blue' },
 }
 
-// «каждый месяц» / «каждые 2 недели» — человекочитаемая частота.
+// «каждый месяц» / «каждые 2 недели» / «каждые 5 недель» — человекочитаемая
+// частота со склонением единицы под число.
 function frequencyText(freq: RecurrenceFrequency, interval: number): string {
-  const unit = FREQUENCY_LABEL[freq]
-  if (interval === 1) return `каждый ${unit}`
-  return `каждые ${interval} (${unit})`
+  if (interval === 1) return EVERY_SINGULAR[freq]
+  const [one, few, many] = UNIT_FORMS[freq]
+  return `каждые ${interval} ${pluralRu(interval, one, few, many)}`
 }
 
 function formatDateTime(iso: string): string {
@@ -109,6 +119,7 @@ export function RecurringPage() {
       queryClient.invalidateQueries({ queryKey: ['recurring'] })
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      queryClient.invalidateQueries({ queryKey: ['transactions-stats'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
       queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
       queryClient.invalidateQueries({ queryKey: ['budgets'] })
