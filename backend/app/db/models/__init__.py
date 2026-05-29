@@ -6,6 +6,7 @@
     в alembic/env.py.
     """
 from app.db.models.account import Account
+from app.db.models.budget import Budget
 from app.db.models.category import Category
 from app.db.models.email_token import EmailToken
 from app.db.models.exchange_rate import ExchangeRate

@@ -405,6 +405,42 @@ async def test_update_and_delete_rule(
     assert missing.status_code == 404
 
 
+async def test_patch_end_at_in_past_deactivates_rule(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """Если задать дату окончания, которая уже позади ближайшего запуска,
+    правило деактивируется сразу в PATCH (а не ждёт следующего /run)."""
+    account_id = await _create_account(
+        client, auth_headers, "Карта", "1000", opening_date=_OLD_OPENING
+    )
+    now = datetime.now(timezone.utc)
+    create = await client.post(
+        "/api/v1/recurring-transactions",
+        json={
+            "name": "Кофе",
+            "kind": "expense",
+            "account_id": account_id,
+            "amount": "100",
+            "frequency": "daily",
+            "interval": 1,
+            "start_at": _iso(now - timedelta(days=3)),
+        },
+        headers=auth_headers,
+    )
+    rule_id = create.json()["id"]
+    # Прогон сдвигает next_run_at в будущее.
+    await client.post("/api/v1/recurring-transactions/run", headers=auth_headers)
+
+    # Дата окончания «вчера» (>= start_at, но < next_run_at) → правило завершено.
+    patch = await client.patch(
+        f"/api/v1/recurring-transactions/{rule_id}",
+        json={"end_at": _iso(now - timedelta(days=1))},
+        headers=auth_headers,
+    )
+    assert patch.status_code == 200
+    assert patch.json()["is_active"] is False
+
+
 async def test_transfer_requires_target(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:

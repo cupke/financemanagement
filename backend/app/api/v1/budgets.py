@@ -291,10 +291,14 @@ def _collect_descendants(
     Без рекурсии — на случай глубокой иерархии, чтобы не получить RecursionError.
     """
     result = [root_id]
+    seen = {root_id}  # защита от циклов в дереве (на случай кривых данных в БД)
     queue: list[int] = [root_id]
     while queue:
         current = queue.pop(0)
         for child_id in children.get(current, []):
+            if child_id in seen:
+                continue
+            seen.add(child_id)
             result.append(child_id)
             queue.append(child_id)
     return result

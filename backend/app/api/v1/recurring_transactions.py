@@ -304,6 +304,9 @@ async def update_recurring(
         rule.amount = payload.amount
     if "note" in fields:
         rule.note = payload.note if payload.note else None
+    # Смена частоты/интервала применяется со СЛЕДУЮЩЕГО цикла: уже
+    # запланированный next_run_at не сдвигаем (он сработает по старому
+    # расписанию), а дальше движок считает по новым frequency/interval.
     if "frequency" in fields and payload.frequency is not None:
         rule.frequency = payload.frequency
     if "interval" in fields and payload.interval is not None:
@@ -318,6 +321,14 @@ async def update_recurring(
                 detail="Дата окончания не может быть раньше даты начала",
             )
         rule.end_at = payload.end_at
+        # Если новая дата окончания уже позади ближайшего запуска — правило
+        # завершено, гасим сразу (не дожидаясь /run), чтобы статус в UI был
+        # консистентным.
+        if (
+            rule.end_at is not None
+            and ensure_aware_utc(rule.next_run_at) > ensure_aware_utc(rule.end_at)
+        ):
+            rule.is_active = False
     if "is_active" in fields and payload.is_active is not None:
         was_active = rule.is_active
         rule.is_active = payload.is_active

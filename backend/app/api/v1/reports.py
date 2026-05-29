@@ -175,6 +175,17 @@ async def get_overview(
                 .order_by(ExchangeRate.rate_date.desc())
                 .limit(1)
             )
+            if rate is None:
+                # На дату when курса нет (например, opening_date счёта раньше
+                # самого старого курса в кеше). Берём самый ранний доступный
+                # курс — иначе суммы/базовый капитал валютного счёта занулятся
+                # и линия баланса в отчёте «провалится».
+                rate = await session.scalar(
+                    select(ExchangeRate.vunit_rate)
+                    .where(ExchangeRate.char_code == currency)
+                    .order_by(ExchangeRate.rate_date.asc())
+                    .limit(1)
+                )
             rate_cache[key] = rate or Decimal("0")
         return rate_cache[key]
 
