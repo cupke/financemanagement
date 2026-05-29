@@ -155,6 +155,12 @@ async def get_overview(
     if account_id is not None and not accounts:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Счёт не найден")
     scope_ids = {a.id for a in accounts}
+    # Валюта каждого счёта в области — нужна, чтобы у кросс-валютного перевода
+    # «вторую ногу» (зачисление на получателя, target_amount) пересчитать по
+    # ВАЛЮТЕ ПОЛУЧАТЕЛЯ, а не источника (currency_code транзакции = валюта
+    # источника). В режиме одного счёта здесь будет лишь он сам — этого хватает,
+    # потому что чужая «нога» в scope_ids всё равно не попадает.
+    currency_by_account = {a.id: a.currency_code for a in accounts}
 
     # Валюта отчёта: один счёт — его валюта; все счета — рубли.
     display_currency = accounts[0].currency_code.upper() if account_id is not None else "RUB"
@@ -259,6 +265,7 @@ async def get_overview(
         Transaction.occurred_at,
         Transaction.account_id,
         Transaction.transfer_account_id,
+        Transaction.target_amount,
     ).where(Transaction.owner_id == current_user.id)
     if account_id is not None:
         bal_stmt = bal_stmt.where(
@@ -271,18 +278,25 @@ async def get_overview(
 
     pre_range = Decimal("0")
     delta_by_bucket = [Decimal("0")] * n_buckets
-    for kind, amount, currency, occurred_at, acc_id, transfer_acc_id in bal_rows:
-        val = await convert(amount, currency, occurred_at.date())
+    for kind, amount, currency, occurred_at, acc_id, transfer_acc_id, target_amount in bal_rows:
         delta = Decimal("0")
+        # Списание/зачисление по основному счёту операции (источник).
+        # amount — в валюте источника (= currency_code транзакции).
         if acc_id in scope_ids:
+            val = await convert(amount, currency, occurred_at.date())
             if kind == "income":
                 delta += val
             elif kind == "expense":
                 delta -= val
             elif kind == "transfer":
                 delta -= val
+        # «Вторая нога» перевода — зачисление на получателя. Для кросс-валютного
+        # перевода это target_amount в валюте ПОЛУЧАТЕЛЯ; для одновалютного —
+        # тот же amount (target_amount = NULL). Конвертируем по валюте получателя.
         if kind == "transfer" and transfer_acc_id in scope_ids:
-            delta += val
+            credited = target_amount if target_amount is not None else amount
+            target_currency = currency_by_account.get(transfer_acc_id, currency)
+            delta += await convert(credited, target_currency, occurred_at.date())
         if delta == 0:
             continue
         if occurred_at < range_start:

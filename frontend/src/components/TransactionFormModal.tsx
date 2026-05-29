@@ -21,6 +21,7 @@
 
   import { listAccountsRequest, type AccountRead } from '../api/accounts'
   import { listCategoriesRequest } from '../api/categories'
+  import { listRatesRequest } from '../api/rates'
   import {
     createTransactionRequest,
     updateTransactionRequest,
@@ -34,11 +35,15 @@
   // Zod-схема. Mantine 9 dates возвращают строки ISO 8601, а не Date — поэтому
   // occurred_at это string. Кросс-полевые правила (transfer требует второй счёт,
   // и счета не должны совпадать) — через .refine() в конце.
+  // target_amount (сумма зачисления для кросс-валютного перевода) проверяется
+  // не здесь, а в компоненте: zod не знает валют выбранных счетов (они приходят
+  // из отдельного запроса /accounts, а не из значений формы).
   const transactionSchema = z
     .object({
       kind: z.enum(['income', 'expense', 'transfer']),
       account_id: z.string().min(1, 'Выберите счёт'),
       amount: z.number().gt(0, 'Сумма должна быть больше 0'),
+      target_amount: z.number().nullable(),
       category_id: z.string().nullable(),
       transfer_account_id: z.string().nullable(),
       occurred_at: z.string().min(1, 'Выберите дату'),
@@ -80,6 +85,7 @@
         kind: tx.kind,
         account_id: String(tx.account_id),
         amount: Number(tx.amount),
+        target_amount: tx.target_amount !== null ? Number(tx.target_amount) : null,
         category_id: tx.category_id !== null ? String(tx.category_id) : null,
         transfer_account_id:
           tx.transfer_account_id !== null ? String(tx.transfer_account_id) : null,
@@ -93,6 +99,7 @@
       kind: 'expense',
       account_id: '',
       amount: 0,
+      target_amount: null,
       category_id: null,
       transfer_account_id: null,
       // Picker'у даём текущий момент в local-формате (без таймзоны).
@@ -138,12 +145,13 @@
       // kind заблокирован — этот эффект на edit-сценарий не сработает.
       // - category_id всегда — потому что категории разделены по kind
       //   (после deepening category-feature: расходную нельзя для дохода).
-      // - transfer_account_id только когда не transfer.
+      // - transfer_account_id и target_amount только когда не transfer.
       useEffect(() => {
         if (isEditing) return
         form.setFieldValue('category_id', null)
         if (form.values.kind !== 'transfer') {
           form.setFieldValue('transfer_account_id', null)
+          form.setFieldValue('target_amount', null)
         }
         // Не добавляем form в deps — это вызовет infinite loop. Реагируем только на kind.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,6 +179,9 @@
           kind: values.kind,
           account_id: Number(values.account_id),
           amount: values.amount,
+          // target_amount шлём только для кросс-валютного перевода. Для
+          // одновалютного и income/expense бэк ожидает его отсутствие.
+          target_amount: isCrossCurrency ? values.target_amount : null,
           category_id:
             values.category_id !== null && values.category_id !== ''
               ? Number(values.category_id)
@@ -243,6 +254,71 @@
         (a) => String(a.id) === (form.values.transfer_account_id ?? ''),
       ) ?? null
     const amount = Number(form.values.amount) || 0
+    const isTransfer = form.values.kind === 'transfer'
+    // Кросс-валютный перевод: выбраны оба счёта и их валюты различаются.
+    // Тогда показываем поле «Сумма зачисления» (в валюте получателя).
+    const isCrossCurrency =
+      isTransfer &&
+      !!sourceAccount &&
+      !!targetAccount &&
+      sourceAccount.currency_code !== targetAccount.currency_code
+    const targetAmount = Number(form.values.target_amount) || 0
+
+    // Курсы ЦБ — нужны только для предзаполнения суммы зачисления. Тянем лениво
+    // (enabled), кешируем надолго: курс за день не меняется.
+    const { data: ratesData } = useQuery({
+      queryKey: ['rates'],
+      queryFn: listRatesRequest,
+      enabled: isCrossCurrency && !isEditing,
+      staleTime: 1000 * 60 * 60,
+    })
+
+    // Курс «рублей за 1 единицу валюты» по данным ЦБ. RUB — база (=1), его в
+    // фиде ЦБ нет. Для прочих валют берём vunit_rate. null — курса пока нет.
+    function vunitOf(code: string): number | null {
+      if (code.toUpperCase() === 'RUB') return 1
+      const r = ratesData?.items.find(
+        (i) => i.char_code === code.toUpperCase(),
+      )
+      return r ? Number(r.vunit_rate) : null
+    }
+
+    // «1 единица валюты получателя = сколько в валюте источника» по курсу ЦБ.
+    // Например, для RUB→USD это «90 ₽ за 1 $».
+    function oneTargetInSource(): number | null {
+      if (!sourceAccount || !targetAccount) return null
+      const sv = vunitOf(sourceAccount.currency_code)
+      const tv = vunitOf(targetAccount.currency_code)
+      if (!sv || !tv) return null
+      return tv / sv
+    }
+
+    // Предзаполнить сумму зачисления по курсу ЦБ: amount (в валюте источника)
+    // → в валюту получателя. Считаем через рубли как общий знаменатель.
+    function prefillByCbr() {
+      if (!sourceAccount || !targetAccount || amount <= 0) return
+      const sv = vunitOf(sourceAccount.currency_code)
+      const tv = vunitOf(targetAccount.currency_code)
+      if (!sv || !tv) return
+      const credited = (amount * sv) / tv
+      // Округляем до копеек — столько же знаков, сколько хранит бэк (Numeric(15,2)).
+      form.setFieldValue('target_amount', Math.round(credited * 100) / 100)
+    }
+
+    // Авто-предзаполнение один раз: как только стал виден кросс-валютный перевод
+    // и курсы загрузились, а поле ещё пустое — подставляем расчёт по ЦБ.
+    // Дальше пользователь правит вручную (банковский курс отличается от ЦБ).
+    useEffect(() => {
+      if (
+        isCrossCurrency &&
+        ratesData &&
+        amount > 0 &&
+        (form.values.target_amount === null || form.values.target_amount === 0)
+      ) {
+        prefillByCbr()
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isCrossCurrency, ratesData, amount])
 
     // Проверка «не повлияет на баланс»: дата операции раньше opening_date
     // хотя бы одного из затронутых счетов. Та же логика, что на бэке
@@ -255,7 +331,6 @@
       sourceAccount && txDate && txDate < new Date(sourceAccount.opening_date)
     const targetUnaffected =
       targetAccount && txDate && txDate < new Date(targetAccount.opening_date)
-    const isTransfer = form.values.kind === 'transfer'
     // Для income/expense смотрим только на источник. Для transfer — на оба.
     const willNotAffectBalance = isTransfer
       ? sourceUnaffected || targetUnaffected
@@ -270,15 +345,29 @@
     }
 
     function targetBalanceAfter(): number | null {
-      if (!targetAccount || amount <= 0) return null
-      if (form.values.kind !== 'transfer') return null
-      return Number(targetAccount.balance) + amount
+      if (!targetAccount || form.values.kind !== 'transfer') return null
+      // Для кросс-валютного перевода на получателя приходит target_amount
+      // (в его валюте), для одновалютного — тот же amount.
+      const credited = isCrossCurrency ? targetAmount : amount
+      if (credited <= 0) return null
+      return Number(targetAccount.balance) + credited
     }
 
     const handleClose = () => {
       form.reset()
       onClose()
     }
+
+    // Валидация суммы зачисления — в момент сабмита (zod не видит валют счетов).
+    const handleSubmit = (values: TransactionFormValues) => {
+      if (isCrossCurrency && (!values.target_amount || values.target_amount <= 0)) {
+        form.setFieldError('target_amount', 'Укажите сумму зачисления')
+        return
+      }
+      saveMutation.mutate(values)
+    }
+
+    const crossRate = oneTargetInSource()
 
     return (
       <Modal
@@ -288,7 +377,7 @@
         centered
         size="md"
       >
-        <form onSubmit={form.onSubmit((values) => saveMutation.mutate(values))}>
+        <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack>
             {/* В режиме редактирования объясняем, почему часть полей заблокирована.
                 Это критично для UX: иначе пользователь будет думать «почему я не
@@ -341,7 +430,11 @@
             )}
 
             <NumberInput
-              label="Сумма"
+              label={
+                isCrossCurrency
+                  ? `Сумма списания${sourceAccount ? ` (${sourceAccount.currency_code})` : ''}`
+                  : 'Сумма'
+              }
               decimalScale={2}
               fixedDecimalScale
               allowNegative={false}
@@ -350,6 +443,50 @@
               disabled={isEditing}
               {...form.getInputProps('amount')}
             />
+
+            {/* Кросс-валютный перевод: второе поле — сумма зачисления в валюте
+                получателя. Авто-предзаполняется по курсу ЦБ, но редактируемо —
+                банк/обменник берёт свой курс с комиссией, поэтому реально
+                приходит не «по ЦБ». Кнопка «По курсу ЦБ» пересчитывает заново. */}
+            {isCrossCurrency && !isEditing && (
+              <Stack gap={4}>
+                <NumberInput
+                  label={`Сумма зачисления (${targetAccount?.currency_code})`}
+                  description="Сколько реально пришло на счёт-получатель"
+                  decimalScale={2}
+                  fixedDecimalScale
+                  allowNegative={false}
+                  min={0.01}
+                  required
+                  {...form.getInputProps('target_amount')}
+                />
+                <Group justify="space-between" gap="xs">
+                  {crossRate !== null && targetAccount && sourceAccount ? (
+                    <Text size="xs" c="dimmed">
+                      Курс ЦБ
+                      {ratesData?.rate_date ? ` на ${ratesData.rate_date}` : ''}:
+                      {' '}
+                      {/* Показываем направление так, чтобы число было ≥ 1
+                          (иначе, напр., «1 RUB ≈ 0.01 $» округлится почти до нуля
+                          и читается плохо). */}
+                      {crossRate >= 1
+                        ? `1 ${targetAccount.currency_code} ≈ ${formatMoney(crossRate, sourceAccount.currency_code)}`
+                        : `1 ${sourceAccount.currency_code} ≈ ${formatMoney(1 / crossRate, targetAccount.currency_code)}`}
+                    </Text>
+                  ) : (
+                    <span />
+                  )}
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    onClick={prefillByCbr}
+                    disabled={amount <= 0 || crossRate === null}
+                  >
+                    ↻ По курсу ЦБ
+                  </Button>
+                </Group>
+              </Stack>
+            )}
 
             {/* Live-preview балансов. Показывается только в режиме создания
                 (PATCH не меняет балансы) и когда счёт выбран + amount > 0.

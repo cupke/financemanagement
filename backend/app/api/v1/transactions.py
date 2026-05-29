@@ -12,8 +12,11 @@
     багов «рассинхрон баланса и истории», который возникал бы при
     полноценном UPDATE с пересчётом балансов «откатить старое →
     применить новое» (особенно для переводов и при смене kind).
-  - Перевод только в одной валюте. Кросс-валютные переводы — после интеграции
-    курсов ЦБ РФ.
+  - Кросс-валютный перевод: если валюты счёта-источника и счёта-получателя
+    различаются, списывается amount (в валюте источника), а зачисляется
+    target_amount (в валюте получателя) — её вводит пользователь, т.к.
+    банковский курс с комиссией отличается от курса ЦБ. Для одновалютного
+    перевода target_amount не нужен (зачисляется тот же amount).
 
   ВАЖНО (модель «opening_balance + движения», см. vkr/02_design.md):
   Транзакция влияет на balance счёта ТОЛЬКО если её occurred_at
@@ -104,7 +107,7 @@ async def create_transaction(
       if payload.category_id is not None:
             category = await session.get(Category, payload.category_id)
             if category is None or category.owner_id != current_user.id:
-                raise HTTPException( 
+                raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Категория не найдена",
                 )
@@ -119,22 +122,51 @@ async def create_transaction(
                     ),
                 )
 
-      # 3. Для перевода — получатель обязательно наш; одновалютность.
+      # 3. Для перевода — получатель обязательно наш. Если валюты совпадают —
+      #    зачисляется тот же amount (target_amount хранить не нужно). Если
+      #    различаются — это кросс-валютный перевод: зачисляется введённый
+      #    пользователем target_amount (в валюте получателя).
       target: Account | None = None
+      # credited_amount — сколько зачислится на получателя; stored_target_amount
+      # — что положим в колонку target_amount (NULL для одновалютных переводов).
+      credited_amount: Decimal = payload.amount
+      stored_target_amount: Decimal | None = None
       if payload.kind == "transfer":
           # transfer_account_id точно не None: проверено model_validator'ом схемы.
           assert payload.transfer_account_id is not None
           target = await _get_owned_account_or_404(
               payload.transfer_account_id, current_user, session
           )
-          if target.currency_code != source.currency_code:
-              raise HTTPException(
-                  status_code=status.HTTP_400_BAD_REQUEST,
-                  detail=(
-                      "Перевод между счетами разных валют пока не поддерживается. "
-                      "Эта функция появится вместе с интеграцией курсов ЦБ РФ."
-                  ),
-              )
+          if target.currency_code == source.currency_code:
+              # Одновалютный перевод. target_amount тут — лишнее поле; принимаем
+              # только если он не противоречит amount, иначе — понятная 400
+              # (а не тихое игнорирование переданного значения).
+              if (
+                  payload.target_amount is not None
+                  and payload.target_amount != payload.amount
+              ):
+                  raise HTTPException(
+                      status_code=status.HTTP_400_BAD_REQUEST,
+                      detail=(
+                          "Для перевода в одной валюте сумма зачисления равна "
+                          "сумме списания — не указывайте её отдельно."
+                      ),
+                  )
+              credited_amount = payload.amount
+              stored_target_amount = None
+          else:
+              # Кросс-валютный перевод: сумма зачисления обязательна.
+              if payload.target_amount is None:
+                  raise HTTPException(
+                      status_code=status.HTTP_400_BAD_REQUEST,
+                      detail=(
+                          f"Перевод между счетами разных валют ({source.currency_code} "
+                          f"→ {target.currency_code}): укажите сумму зачисления "
+                          f"в {target.currency_code} (поле target_amount)."
+                      ),
+                  )
+              credited_amount = payload.target_amount
+              stored_target_amount = payload.target_amount
 
       # 4. Валюта операции — snapshot валюты счёта-источника, если клиент
       #    не передал явно. .upper() для нормализации (RUB / Rub / rub).
@@ -148,6 +180,7 @@ async def create_transaction(
           account_id=payload.account_id,
           kind=payload.kind,
           amount=payload.amount,
+          target_amount=stored_target_amount,
           currency_code=currency,
           category_id=payload.category_id,
           transfer_account_id=payload.transfer_account_id,
@@ -171,8 +204,10 @@ async def create_transaction(
           assert target is not None  # установлен выше
           # Для перевода — независимая проверка для счёта-получателя:
           # его opening_date может отличаться от opening_date источника.
+          # Зачисляем credited_amount: для одновалютного — это amount, для
+          # кросс-валютного — target_amount в валюте получателя.
           await _apply_signed_delta_to_account(
-              target, payload.amount, payload.occurred_at, session
+              target, credited_amount, payload.occurred_at, session
           )
 
       await session.commit()
@@ -337,9 +372,16 @@ async def update_transaction(
                       Account, transaction.transfer_account_id
                   )
                   assert target_account is not None
+                  # Получателю при переводе зачислялся credited amount:
+                  # target_amount для кросс-валютного, иначе amount.
+                  credited = (
+                      transaction.target_amount
+                      if transaction.target_amount is not None
+                      else transaction.amount
+                  )
                   await _shift_balance_for_date_change(
                       target_account,
-                      transaction.amount,
+                      credited,
                       old_occurred_at,
                       new_occurred_at,
                       session,
@@ -369,7 +411,8 @@ async def delete_transaction(
       """Удалить транзакцию и зеркально откатить эффект на балансах счетов.
 
       DELETE применяет противоположный delta к источнику; для перевода —
-      дополнительно вычитает amount из получателя. Всё в одной БД-транзакции.
+      дополнительно вычитает зачисленную сумму из получателя (target_amount
+      для кросс-валютного, иначе amount). Всё в одной БД-транзакции.
       """
       transaction = await _get_owned_transaction_or_404(
           transaction_id, current_user, session
@@ -391,9 +434,15 @@ async def delete_transaction(
       if transaction.kind == "transfer":
           target_account = await session.get(Account, transaction.transfer_account_id)
           assert target_account is not None
+          # Откатываем именно ту сумму, что зачисляли получателю.
+          credited = (
+              transaction.target_amount
+              if transaction.target_amount is not None
+              else transaction.amount
+          )
           await _apply_signed_delta_to_account(
               target_account,
-              -transaction.amount,
+              -credited,
               transaction.occurred_at,
               session,
           )

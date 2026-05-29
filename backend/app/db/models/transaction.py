@@ -4,11 +4,18 @@
   - income — доход (зачисление): balance счёта += amount.
   - expense — расход (списание): balance счёта -= amount.
   - transfer — перевод между двумя своими счетами: balance источника -= amount,
-    balance получателя += amount, всё в одной БД-транзакции (атомарно).
+    balance получателя += amount (или += target_amount для кросс-валютного
+    перевода), всё в одной БД-транзакции (атомарно).
 
   amount всегда положительное; знак вычисляется по kind. Так SUM по периодам
   становится тривиальным (без CASE), а пересчёт баланса при удалении —
   зеркальное применение того же знака.
+
+  Кросс-валютные переводы: если счёт-источник и счёт-получатель в разных
+  валютах, списывается amount (в валюте источника), а зачисляется target_amount
+  (в валюте получателя) — сумму зачисления вводит пользователь (банковский курс
+  отличается от ЦБ). Для обычных и одновалютных переводов target_amount = NULL,
+  и тогда на получателя зачисляется тот же amount.
   """
 from datetime import datetime
 from decimal import Decimal
@@ -69,7 +76,19 @@ class Transaction(Base):
       kind: Mapped[str] = mapped_column(TransactionKind, nullable=False)
 
       # Всегда > 0. Знак определяется kind (см. _signed_delta_for_source в роутере).
+      # Для перевода это сумма СПИСАНИЯ со счёта-источника (в валюте источника).
       amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+
+      # Сумма ЗАЧИСЛЕНИЯ на счёт-получатель для КРОСС-валютного перевода —
+      # в валюте получателя. NULL для income/expense и для одновалютных
+      # переводов (тогда на получателя зачисляется тот же amount). Зачем
+      # хранить отдельно, а не считать по курсу ЦБ: банк/обменник берёт свой
+      # курс и комиссию, поэтому реально зачисленная сумма отличается от
+      # «по ЦБ»; для точности личных финансов её вводит пользователь.
+      target_amount: Mapped[Decimal | None] = mapped_column(
+          Numeric(15, 2),
+          nullable=True,
+      )
 
       # Snapshot валюты на момент операции. Если потом юзер сменит currency_code
       # счёта, исторические транзакции останутся с исходной валютой — это нужно
@@ -133,6 +152,16 @@ class Transaction(Base):
           CheckConstraint(
               "(kind = 'transfer') OR (transfer_account_id IS NULL)",
               name="ck_transactions_non_transfer_shape",
+          ),
+          # target_amount допустим только для перевода (для income/expense — NULL).
+          CheckConstraint(
+              "(target_amount IS NULL) OR (kind = 'transfer')",
+              name="ck_transactions_target_amount_transfer_only",
+          ),
+          # Если задана — должна быть положительной (как и amount).
+          CheckConstraint(
+              "(target_amount IS NULL) OR (target_amount > 0)",
+              name="ck_transactions_target_amount_positive",
           ),
       )
 

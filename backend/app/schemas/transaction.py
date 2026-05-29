@@ -39,14 +39,23 @@ class TransactionCreate(BaseModel):
       - amount > 0 (через Field(gt=0));
       - для перевода: transfer_account_id обязателен, category_id запрещён,
         transfer_account_id != account_id;
-      - для income/expense: transfer_account_id запрещён.
+      - для income/expense: transfer_account_id и target_amount запрещены.
 
       Эти же инварианты дублируются на уровне БД CHECK-констрейнтами —
       Pydantic даёт понятный 422, БД защищает от багов в коде.
       """
       kind: TransactionKind
       account_id: int
-      amount: Decimal = Field(..., gt=0, description="Положительная сумма")
+      amount: Decimal = Field(..., gt=0, description="Положительная сумма (для перевода — сумма списания)")
+      target_amount: Decimal | None = Field(
+          default=None,
+          gt=0,
+          description=(
+              "Сумма зачисления на счёт-получатель в его валюте. Указывается "
+              "ТОЛЬКО для кросс-валютного перевода (валюты счетов различаются). "
+              "Для одновалютного перевода и income/expense — не передаётся."
+          ),
+      )
       currency_code: str | None = Field(
           default=None,
           min_length=3,
@@ -83,6 +92,12 @@ class TransactionCreate(BaseModel):
                   raise ValueError(
                       "transfer_account_id допустим только для kind='transfer'"
                   )
+              # target_amount имеет смысл только для перевода. Для income/expense
+              # это явная ошибка вызова — лучше 422, чем тихо проигнорировать.
+              if self.target_amount is not None:
+                  raise ValueError(
+                      "target_amount допустим только для kind='transfer'"
+                  )
           return self
 
 
@@ -93,6 +108,9 @@ class TransactionRead(BaseModel):
       account_id: int
       kind: TransactionKind
       amount: Decimal
+      # Сумма зачисления для кросс-валютного перевода (в валюте получателя).
+      # null — обычная операция или одновалютный перевод.
+      target_amount: Decimal | None
       currency_code: str
       category_id: int | None
       transfer_account_id: int | None

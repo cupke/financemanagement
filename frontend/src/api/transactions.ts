@@ -12,6 +12,9 @@
     // Numeric(15,2) сериализуется в строку, как и balance — точность float-а
     // не подходит для денег. Парсим в Number при отображении.
     amount: string
+    // Сумма зачисления для кросс-валютного перевода (в валюте счёта-получателя).
+    // null — обычная операция или перевод в той же валюте.
+    target_amount: string | null
     currency_code: string
     category_id: number | null
     transfer_account_id: number | null
@@ -25,6 +28,10 @@
     kind: TransactionKind
     account_id: number
     amount: number
+    // Только для кросс-валютного перевода (валюты счетов различаются): сумма
+    // зачисления в валюте получателя. Для одновалютного перевода и income/expense
+    // не передаётся — бэк зачислит тот же amount.
+    target_amount?: number | null
     currency_code?: string
     category_id?: number | null
     transfer_account_id?: number | null
