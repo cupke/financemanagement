@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """seed_test_data.py — заполнение БД FinTrack тестовыми данными.
 
-Что создаёт:
+Что создаёт (покрывает ВСЕ фичи приложения для smoke-теста):
 - Тестового юзера (по умолчанию seed@example.com / seedpass123).
 - 4 счёта разных типов и валют (Сбер карта, Тинькофф накопит., Наличные, USD карта).
 - Дерево категорий: 4 expense-категории с подкатегориями + 3 income.
 - ~300 транзакций за последние 6 месяцев: регулярная зарплата 10-го числа,
   аренда 5-го, ЖКХ 15-го, подписки + случайные продукты/кафе/такси/бензин
-  с реалистичной плотностью + 8 переводов между счетами. ~50 в текущем месяце
+  с реалистичной плотностью + 8 одновалютных переводов + 3 КРОСС-ВАЛЮТНЫХ
+  перевода (RUB↔USD, с разной суммой списания/зачисления). ~50 в текущем месяце
   (двигают балансы) + ~250 старше opening_date (бейдж «не в балансе»).
   Использует random.seed(42) — данные одинаковые при каждом запуске.
+- 5 бюджетов на текущий месяц (разные статусы: ok / warning / превышение).
+- 5 правил повторяющихся операций (зарплата, аренда, подписка, автонакопление —
+  все на будущее; одно «назревшее» правило для проверки авто-генерации).
 
-  ~300 POST-запросов через API ≈ 10-15 секунд работы скрипта.
+  ~310 POST-запросов через API ≈ 10-15 секунд работы скрипта.
 
 Зачем: ручной ввод 4 счетов + 15 категорий + 25 транзакций — это полчаса
 кликов. Скрипт делает то же за 3 секунды и даёт воспроизводимый набор
@@ -107,9 +111,21 @@ def main() -> int:
         count_recent, count_retro = create_transactions(client, accounts, categories)
         print()
 
+        # 5. Бюджеты на текущий месяц.
+        print("🎯 Бюджеты (текущий месяц)")
+        budgets_count = create_budgets(client, categories)
+        print()
+
+        # 6. Повторяющиеся (регулярные) операции.
+        print("🔄 Повторяющиеся операции")
+        recurring_count = create_recurring(client, accounts, categories)
+        print()
+
         print(f"✅ Готово!")
         print(f"   {count_recent} операций после opening_date (двигают balance)")
         print(f"   {count_retro} операций до opening_date (бейдж «не в балансе»)")
+        print(f"   {budgets_count} бюджетов на текущий месяц")
+        print(f"   {recurring_count} правил повторяющихся операций")
         print()
         print(f"   Открой фронт и залогинься: {args.email} / {args.password}")
 
@@ -170,7 +186,7 @@ def create_accounts(client: httpx.Client, opening_date: datetime) -> dict[str, d
     data_list = [
         {"name": "Сбер карта",        "kind": "card",    "opening_balance": 150000, "currency_code": "RUB", "note": "Зарплатная"},
         {"name": "Тинькофф накопит.", "kind": "savings", "opening_balance": 500000, "currency_code": "RUB", "note": "Подушка безопасности"},
-        {"name": "Наличные",          "kind": "cash",    "opening_balance": 8000,   "currency_code": "RUB"},
+        {"name": "Наличные",          "kind": "cash",    "opening_balance": 30000,  "currency_code": "RUB"},
         {"name": "USD карта",         "kind": "card",    "opening_balance": 1200,   "currency_code": "USD", "note": "Travel"},
     ]
     created: dict[str, dict] = {}
@@ -429,7 +445,7 @@ def generate_transactions(now: datetime) -> list[dict]:
                 "note": random.choice(["Amazon", "Steam", "GitHub", "AWS", None]),
             })
 
-    # === Разовые: переводы между счетами ===
+    # === Разовые: переводы между счетами (одновалютные, RUB ↔ RUB) ===
     # 8 переводов на случайные дни в диапазоне 5..170 дней назад
     transfer_days = sorted(random.sample(range(5, 170), 8))
     for day_ago in transfer_days:
@@ -444,6 +460,28 @@ def generate_transactions(now: datetime) -> list[dict]:
             "kind": "transfer", "from": src, "cat": None,
             "amount": random.randint(5, 50) * 1000,  # 5000..50000, круглые
             "occurred": _random_time(date, 10, 20),
+            "note": note,
+            "transfer_to": dst,
+        })
+
+    # === Кросс-валютные переводы (RUB ↔ USD) ===
+    # Демонстрируют фичу: со счёта-источника списывается amount в его валюте,
+    # на счёт-получатель зачисляется target_amount в его валюте (сумму ввёл бы
+    # пользователь по факту банковской операции — курс отличается от ЦБ).
+    # Кладём в последние ~30 дней, чтобы двигали текущие балансы и были видны.
+    # Поля: (дней назад, источник, получатель, списание, зачисление, заметка)
+    cross_currency_specs = [
+        (22, "Сбер карта", "USD карта", 9300, 100, "Купил $ на поездку"),
+        (12, "Сбер карта", "USD карта", 19000, 200, "Пополнил долларовую"),
+        (5,  "USD карта", "Сбер карта", 150, 13800, "Вернул часть в рубли"),
+    ]
+    for day_ago, src, dst, amount, target_amount, note in cross_currency_specs:
+        date = now - timedelta(days=day_ago)
+        txs.append({
+            "kind": "transfer", "from": src, "cat": None,
+            "amount": amount,
+            "target_amount": target_amount,  # ← отличает кросс-валютный перевод
+            "occurred": _random_time(date, 10, 19),
             "note": note,
             "transfer_to": dst,
         })
@@ -484,6 +522,9 @@ def create_transactions(client: httpx.Client, accounts: dict[str, dict],
             body["category_id"] = categories[tx["cat"]]["id"]
         if tx["kind"] == "transfer":
             body["transfer_account_id"] = accounts[tx["transfer_to"]]["id"]
+            # Кросс-валютный перевод: сумма зачисления в валюте получателя.
+            if tx.get("target_amount") is not None:
+                body["target_amount"] = tx["target_amount"]
 
         r = client.post("/api/v1/transactions", json=body)
         if r.status_code != 201:
@@ -503,6 +544,159 @@ def create_transactions(client: httpx.Client, accounts: dict[str, dict],
             print(f"   ... {i}/{len(txs)}")
 
     return recent, retro
+
+
+# ─── Бюджеты ────────────────────────────────────────────────────────────────
+
+def create_budgets(client: httpx.Client, categories: dict[str, dict]) -> int:
+    """Создать бюджеты на ТЕКУЩИЙ месяц для нескольких expense-категорий.
+
+    Лимиты подобраны под плотность сид-расходов так, чтобы получить разные
+    статусы прогресс-бара (ok / warning / exceeded) — наглядно для проверки.
+    Бюджет на родительскую категорию (Жильё, Развлечения) суммирует расходы
+    по всем её подкатегориям (BFS по дереву на бэке).
+
+    Идемпотентность: если бюджет на категорию+месяц уже есть (409 от
+    UniqueConstraint), просто пропускаем.
+    """
+    now = datetime.now(timezone.utc)
+    # (имя категории, месячный лимит в RUB)
+    specs = [
+        ("Продукты", 28000),      # обычно близко к лимиту / превышение
+        ("Кафе", 12000),
+        ("Такси", 6000),
+        ("Жильё", 45000),         # родитель: Аренда (35k) + ЖКХ (~5k)
+        ("Развлечения", 3000),    # родитель: Кино + Подписки — часто превышение
+    ]
+    created = 0
+    for cat_name, amount in specs:
+        cat = categories.get(cat_name)
+        if cat is None:
+            print(f"   ⚠ категория «{cat_name}» не найдена — пропуск бюджета")
+            continue
+        body = {
+            "category_id": cat["id"],
+            "amount": amount,
+            "period_year": now.year,
+            "period_month": now.month,
+        }
+        r = client.post("/api/v1/budgets", json=body)
+        if r.status_code == 201:
+            created += 1
+            print(f"   + {cat_name:14s} лимит {amount:>7} ₽/мес")
+        elif r.status_code == 409:
+            print(f"   · {cat_name:14s} бюджет на этот месяц уже есть")
+        else:
+            print(f"   ⚠ {cat_name}: HTTP {r.status_code}: {r.text}")
+    return created
+
+
+# ─── Повторяющиеся операции ──────────────────────────────────────────────────
+
+def _next_month_day(now: datetime, day: int, hour: int = 12) -> datetime:
+    """Ближайшая БУДУЩАЯ дата с заданным числом месяца.
+
+    Если это число в текущем месяце уже прошло (или сегодня) — берём следующий
+    месяц. Так созданные правила «ждут» первого срабатывания в будущем и не
+    генерируют операции задним числом (catch-up) при заходе в приложение.
+    """
+    candidate = now.replace(
+        day=min(day, 28), hour=hour, minute=0, second=0, microsecond=0
+    )
+    if candidate <= now:
+        # перейти на следующий месяц
+        year, month = now.year, now.month
+        month += 1
+        if month == 13:
+            month, year = 1, year + 1
+        candidate = candidate.replace(year=year, month=month)
+    return candidate
+
+
+def create_recurring(client: httpx.Client, accounts: dict[str, dict],
+                     categories: dict[str, dict]) -> int:
+    """Создать несколько правил повторяющихся операций.
+
+    Все правила стартуют в БУДУЩЕМ (start_at), кроме одного «прошлого» —
+    оно станет назревшим, и при заходе в приложение авто-/run (или кнопка
+    «Выполнить запланированные») сгенерирует по нему одну операцию: так можно
+    наглядно проверить и список правил, и сам движок catch-up.
+
+    Идемпотентность грубая: при повторном запуске создадутся дубли правил с
+    тем же именем (UniqueConstraint на правила не навешен) — для чистого набора
+    запускай скрипт с --reset.
+    """
+    now = datetime.now(timezone.utc)
+
+    def acc(name: str) -> int:
+        return accounts[name]["id"]
+
+    def cat(name: str) -> int:
+        return categories[name]["id"]
+
+    # (name, kind, from, cat|None, amount, freq, start_at, transfer_to|None, note)
+    rules = [
+        {
+            "name": "Зарплата", "kind": "income", "account": "Сбер карта",
+            "category_id": cat("Зарплата"), "amount": 85000, "frequency": "monthly",
+            "start_at": _next_month_day(now, 10, 11),
+            "note": "Ежемесячная зарплата",
+        },
+        {
+            "name": "Аренда квартиры", "kind": "expense", "account": "Сбер карта",
+            "category_id": cat("Аренда"), "amount": 35000, "frequency": "monthly",
+            "start_at": _next_month_day(now, 5, 14),
+            "note": "Аренда",
+        },
+        {
+            "name": "Подписка Spotify", "kind": "expense", "account": "Сбер карта",
+            "category_id": cat("Подписки"), "amount": 299, "frequency": "monthly",
+            "start_at": _next_month_day(now, 1, 9),
+            "note": "Spotify",
+        },
+        {
+            "name": "Откладываю на накопительный", "kind": "transfer",
+            "account": "Сбер карта", "category_id": None, "amount": 20000,
+            "frequency": "monthly", "start_at": _next_month_day(now, 10, 12),
+            "transfer_to": "Тинькофф накопит.", "note": "Автонакопление",
+        },
+        # Прошлое правило — назревшее: даст 1 операцию при первом /run.
+        {
+            "name": "Абонемент в зал", "kind": "expense", "account": "Сбер карта",
+            "category_id": cat("Подписки"), "amount": 1990, "frequency": "monthly",
+            "start_at": now - timedelta(days=2),
+            "note": "Фитнес (тест авто-генерации)",
+        },
+    ]
+
+    created = 0
+    for rule in rules:
+        body: dict = {
+            "name": rule["name"],
+            "kind": rule["kind"],
+            "account_id": acc(rule["account"]),
+            "amount": rule["amount"],
+            "frequency": rule["frequency"],
+            "interval": 1,
+            "start_at": rule["start_at"].isoformat(),
+            "note": rule["note"],
+        }
+        if rule.get("category_id") is not None:
+            body["category_id"] = rule["category_id"]
+        if rule["kind"] == "transfer":
+            body["transfer_account_id"] = acc(rule["transfer_to"])
+
+        r = client.post("/api/v1/recurring-transactions", json=body)
+        if r.status_code == 201:
+            created += 1
+            when = rule["start_at"].strftime("%d.%m.%Y")
+            print(f"   + {rule['name']:30s} {rule['frequency']:8s} с {when}")
+        else:
+            print(f"   ⚠ {rule['name']}: HTTP {r.status_code}: {r.text}")
+    if created:
+        print("   ℹ Одно правило («Абонемент в зал») назревшее — при заходе в")
+        print("     приложение авто-/run создаст по нему 1 операцию.")
+    return created
 
 
 if __name__ == "__main__":
