@@ -57,7 +57,8 @@
           message: 'Аккаунт создан',
           color: 'green',
         })
-        navigate('/accounts')
+        // После регистрации — на главную (дашборд).
+        navigate('/')
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {

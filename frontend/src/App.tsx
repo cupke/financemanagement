@@ -11,7 +11,8 @@
   import { AppLayout } from './components/AppLayout'
   import { BudgetsPage } from './pages/BudgetsPage'
   import { DashboardPage } from './pages/DashboardPage'
-  import { ReportsPage } from './pages/ReportsPage'
+import { ReportsPage } from './pages/ReportsPage'
+import { RecurringPage } from './pages/RecurringPage'
 
   // Корневой компонент приложения — задаёт карту маршрутов.
   // React Router сопоставляет URL в адресной строке с одним из <Route> и рендерит его element.
@@ -36,6 +37,7 @@
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/budgets" element={<BudgetsPage />} />
+            <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/rates" element={<RatesPage />} />
             <Route path="/me" element={<MePage />} />

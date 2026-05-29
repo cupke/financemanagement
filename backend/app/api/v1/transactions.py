@@ -41,6 +41,15 @@ from app.schemas.transaction import (
       TransactionRead,
       TransactionUpdate,
   )
+# Логика проводки баланса вынесена в общий сервис (app.services.ledger),
+# чтобы её одинаково переиспользовали и обычные операции, и движок
+# повторяющихся операций (DRY). Импортируем под прежними _-именами,
+# чтобы остальной код модуля остался без изменений.
+from app.services.ledger import (
+      apply_signed_delta_to_account as _apply_signed_delta_to_account,
+      ensure_aware_utc as _ensure_aware_utc,
+      signed_delta_for_source as _signed_delta_for_source,
+  )
 
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -395,46 +404,10 @@ async def delete_transaction(
 
 
   # ─── Внутренние хелперы ─────────────────────────────────────────────────
-
-
-def _ensure_aware_utc(dt: datetime) -> datetime:
-      """Если datetime naive — считаем его UTC (так же интерпретирует
-      Postgres при INSERT в TIMESTAMPTZ-колонку).
-
-      Зачем: Mantine 9 DateTimePicker отправляет naive ISO-строки
-      ("2026-04-16T17:08:00", без Z и без offset). Pydantic парсит их
-      в naive datetime. Колонка opening_date в БД — TIMESTAMPTZ, SQLAlchemy
-      возвращает её как aware. Прямое сравнение naive < aware в Python
-      даёт TypeError. Приводим naive к UTC-aware перед сравнением —
-      результат совпадает с реальной семантикой хранения в Postgres.
-      """
-      if dt.tzinfo is None:
-          return dt.replace(tzinfo=timezone.utc)
-      return dt
-
-
-async def _apply_signed_delta_to_account(
-      account: Account,
-      delta: Decimal,
-      occurred_at: datetime,
-      session: AsyncSession,
-  ) -> None:
-      """Применить delta к account.balance, только если occurred_at >= opening_date.
-
-      Транзакции «до opening_date» не двигают balance — их эффект уже учтён
-      в opening_balance счёта (см. модель «opening_balance + движения»
-      в vkr/02_design.md).
-
-      UPDATE через session.execute, а не присваивание atомично на уровне строки
-      в Postgres: защищает от lost update при двух параллельных POST'ах.
-      """
-      if _ensure_aware_utc(occurred_at) < account.opening_date:
-          return
-      await session.execute(
-          update(Account)
-          .where(Account.id == account.id)
-          .values(balance=Account.balance + delta)
-      )
+  #
+  # _ensure_aware_utc, _apply_signed_delta_to_account и _signed_delta_for_source
+  # переехали в app.services.ledger (импортированы выше под теми же именами) —
+  # чтобы движок повторяющихся операций использовал ту же логику без копипасты.
 
 
 async def _shift_balance_for_date_change(
@@ -468,21 +441,6 @@ async def _shift_balance_for_date_change(
           .where(Account.id == account.id)
           .values(balance=Account.balance + sign * delta)
       )
-
-
-def _signed_delta_for_source(kind: str, amount: Decimal) -> Decimal:
-      """Знаковое изменение баланса счёта-источника при СОЗДАНИИ транзакции.
-
-      income → +amount (деньги пришли).
-      expense → -amount (деньги ушли).
-      transfer → -amount (на источнике уменьшается; получатель обновляется
-                          отдельным UPDATE'ом в роутере).
-
-      При DELETE применяется противоположный знак (см. delete_transaction).
-      """
-      if kind == "income":
-          return amount
-      return -amount
 
 
 async def _get_owned_account_or_404(

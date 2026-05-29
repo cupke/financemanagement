@@ -1,3 +1,4 @@
+  import { useEffect, useRef } from 'react'
   import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
   import {
     ActionIcon,
@@ -14,9 +15,10 @@
   } from '@mantine/core'
   import { useDisclosure } from '@mantine/hooks'
   import { notifications } from '@mantine/notifications'
-  import { useQuery } from '@tanstack/react-query'
+  import { useQuery, useQueryClient } from '@tanstack/react-query'
 
   import { getMeRequest } from '../api/auth'
+  import { runRecurringRequest } from '../api/recurring'
   import { useAuthStore } from '../stores/auth'
 
   // Главный layout для авторизованных пользователей: header сверху + sidebar слева
@@ -32,6 +34,38 @@
     const [opened, { toggle, close }] = useDisclosure()
     // Mantine сам хранит выбор темы в localStorage и применяет на каждой загрузке.
     const { colorScheme, toggleColorScheme } = useMantineColorScheme()
+    const queryClient = useQueryClient()
+
+    // Авто-догенерация повторяющихся операций при заходе в приложение.
+    // В проекте нет фонового планировщика — вместо него «ленивый catch-up»:
+    // один раз за монтирование layout'а дёргаем /run, который материализует
+    // все назревшие операции. Эндпоинт идемпотентен по смыслу (повторный
+    // вызов сразу ничего не создаст), поэтому это безопасно. ref-флаг
+    // защищает от двойного запуска в React StrictMode (dev).
+    const didRunRecurring = useRef(false)
+    useEffect(() => {
+      if (didRunRecurring.current) return
+      didRunRecurring.current = true
+      runRecurringRequest()
+        .then((result) => {
+          if (result.created > 0) {
+            notifications.show({
+              title: 'Регулярные операции',
+              message: `Добавлено по расписанию: ${result.created}`,
+              color: 'green',
+            })
+            // Балансы и история изменились — обновляем кеши.
+            queryClient.invalidateQueries({ queryKey: ['accounts'] })
+            queryClient.invalidateQueries({ queryKey: ['transactions'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+            queryClient.invalidateQueries({ queryKey: ['recurring'] })
+          }
+        })
+        // Тихо игнорируем ошибку (например, токен протух) — это фоновое
+        // действие, оно не должно мешать пользоваться приложением.
+        .catch(() => undefined)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     // Email текущего юзера — показываем в правой части header. queryKey совпадает
     // с тем, что использует /me и axios-интерсептор; данные кешированы.
@@ -57,6 +91,7 @@
       { to: '/transactions', label: 'История', icon: '📝' },
       { to: '/categories', label: 'Категории', icon: '📂' },
       { to: '/budgets', label: 'Бюджеты', icon: '💰' },
+      { to: '/recurring', label: 'Регулярные', icon: '🔄' },
       { to: '/reports', label: 'Отчёты', icon: '📈' },
       { to: '/rates', label: 'Курсы валют', icon: '💱' },
       { to: '/me', label: 'Профиль', icon: '👤' },
@@ -88,7 +123,7 @@
             <Group>
               {/* Burger виден только на мобильных (hiddenFrom='sm') */}
               <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-              <UnstyledButton component={Link} to="/accounts">
+              <UnstyledButton component={Link} to="/">
                 <Title order={3}>FinTrack</Title>
               </UnstyledButton>
             </Group>

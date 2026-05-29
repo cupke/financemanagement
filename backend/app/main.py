@@ -21,6 +21,7 @@ from app.api.v1 import users as users_router
 from app.api.v1 import export as export_router
 from app.api.v1 import dashboard as dashboard_router
 from app.api.v1 import reports as reports_router
+from app.api.v1 import recurring_transactions as recurring_router
 from app.config import settings
 from app.db.session import get_session
 
@@ -85,6 +86,7 @@ app.include_router(export_router.router, prefix="/api/v1")
 app.include_router(budgets_router.router, prefix="/api/v1")
 app.include_router(dashboard_router.router, prefix="/api/v1")
 app.include_router(reports_router.router, prefix="/api/v1")
+app.include_router(recurring_router.router, prefix="/api/v1")
 
 
 @app.get(

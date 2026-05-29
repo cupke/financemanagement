@@ -57,7 +57,8 @@ import { Link, useNavigate } from 'react-router-dom'
           message: 'Вход выполнен',
           color: 'green',
         })
-        navigate('/accounts')
+        // После входа — на главную (дашборд), а не на список счетов.
+        navigate('/')
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {
