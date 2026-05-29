@@ -1,4 +1,56 @@
+from datetime import datetime, timezone
+
 from httpx import AsyncClient
+
+
+async def test_change_currency_with_transactions_rejected(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    # По счёту с операциями менять валюту нельзя: суммы операций хранятся в
+    # прежней валюте (snapshot), иначе капитал/баланс исказятся.
+    acc = (
+        await client.post(
+            "/api/v1/accounts",
+            json={"name": "Счёт", "currency_code": "RUB"},
+            headers=auth_headers,
+        )
+    ).json()["id"]
+    await client.post(
+        "/api/v1/transactions",
+        json={
+            "kind": "income",
+            "account_id": acc,
+            "amount": "100",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+        headers=auth_headers,
+    )
+    resp = await client.patch(
+        f"/api/v1/accounts/{acc}",
+        json={"currency_code": "USD"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+async def test_change_currency_empty_account_allowed(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    # На пустом счёте (без операций) сменить валюту можно.
+    acc = (
+        await client.post(
+            "/api/v1/accounts",
+            json={"name": "Пустой", "currency_code": "RUB"},
+            headers=auth_headers,
+        )
+    ).json()["id"]
+    resp = await client.patch(
+        f"/api/v1/accounts/{acc}",
+        json={"currency_code": "usd"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["currency_code"] == "USD"
 
 
 async def test_create_account_minimal(client: AsyncClient, auth_headers: dict[str, str]) -> None:

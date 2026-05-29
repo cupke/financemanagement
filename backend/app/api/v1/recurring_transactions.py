@@ -244,8 +244,13 @@ async def run_due(
 
             created += 1
             rule.last_run_at = occurred_at
+            # anchor_day = число старта правила — чтобы день не «сползал» после
+            # короткого месяца (31 янв → 28 фев → 31 мар, а не → 28 мар).
             rule.next_run_at = next_occurrence(
-                occurred_at, rule.frequency, rule.interval
+                occurred_at,
+                rule.frequency,
+                rule.interval,
+                anchor_day=rule.start_at.day,
             )
             guard += 1
 
@@ -352,7 +357,10 @@ async def update_recurring(
                     rule.is_active = False
                     break
                 rule.next_run_at = next_occurrence(
-                    rule.next_run_at, rule.frequency, rule.interval
+                    rule.next_run_at,
+                    rule.frequency,
+                    rule.interval,
+                    anchor_day=rule.start_at.day,
                 )
                 guard += 1
             if rule.is_active and rule.end_at is not None and ensure_aware_utc(

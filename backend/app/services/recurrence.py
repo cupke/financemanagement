@@ -19,36 +19,53 @@ from datetime import datetime, timedelta
 MAX_OCCURRENCES_PER_RUN = 1000
 
 
-def _add_months(dt: datetime, months: int) -> datetime:
+def _add_months(
+    dt: datetime, months: int, anchor_day: int | None = None
+) -> datetime:
     """Прибавить months календарных месяцев, кламируя день к концу месяца.
 
     Пример: _add_months(31 января, 1) → 28/29 февраля.
     Время суток (часы/минуты) и tzinfo сохраняются.
+
+    anchor_day — «желаемое» число месяца (день старта правила). Если задан,
+    день берётся от него, а не от dt.day. Это лечит «сползание даты»: для
+    правила с 31-го числа цепочка 31 янв → 28 фев → 31 мар (а не → 28 мар),
+    потому что в марте мы снова целимся в 31, а не в обрезанное февральское 28.
     """
     # Переводим (год, месяц) в сквозной индекс месяцев, прибавляем, обратно.
     month_index = dt.month - 1 + months
     year = dt.year + month_index // 12
     month = month_index % 12 + 1
     # Кламп дня: в феврале нет 30/31 — берём последний реальный день месяца.
+    # Целимся в anchor_day (исходное число старта), если он задан.
     last_day = monthrange(year, month)[1]
-    day = min(dt.day, last_day)
+    day = min(anchor_day if anchor_day is not None else dt.day, last_day)
     return dt.replace(year=year, month=month, day=day)
 
 
-def next_occurrence(current: datetime, frequency: str, interval: int) -> datetime:
+def next_occurrence(
+    current: datetime,
+    frequency: str,
+    interval: int,
+    anchor_day: int | None = None,
+) -> datetime:
     """Следующий момент операции после current по правилу (frequency, interval).
 
     - daily   → +interval дней
     - weekly  → +interval недель
     - monthly → +interval месяцев (с клампингом дня)
     - yearly  → +interval лет (29 февраля → 28 февраля в невисокосный год)
+
+    anchor_day — исходное число дня месяца у правила (start_at.day). Передаётся
+    для monthly/yearly, чтобы день не «сползал» после короткого месяца: без него
+    31 янв → 28 фев → 28 мар; с ним 31 янв → 28 фев → 31 мар.
     """
     if frequency == "daily":
         return current + timedelta(days=interval)
     if frequency == "weekly":
         return current + timedelta(weeks=interval)
     if frequency == "monthly":
-        return _add_months(current, interval)
+        return _add_months(current, interval, anchor_day)
     if frequency == "yearly":
-        return _add_months(current, interval * 12)
+        return _add_months(current, interval * 12, anchor_day)
     raise ValueError(f"Неизвестная частота: {frequency!r}")

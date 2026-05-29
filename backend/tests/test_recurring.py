@@ -64,6 +64,21 @@ def test_next_occurrence_weekly_interval() -> None:
     assert next_occurrence(d, "weekly", 2) == d + timedelta(days=14)
 
 
+def test_next_occurrence_anchor_day_avoids_drift() -> None:
+    """С anchor_day день не «сползает» после короткого месяца.
+
+    Правило с 31-го числа: 31 янв → 28 фев → 31 мар (а НЕ → 28 мар), потому что
+    в марте снова целимся в исходное 31-е, а не в обрезанное февральское 28-е.
+    """
+    jan31 = datetime(2026, 1, 31, 9, 0, tzinfo=timezone.utc)
+    feb = next_occurrence(jan31, "monthly", 1, anchor_day=31)
+    assert (feb.month, feb.day) == (2, 28)
+    mar = next_occurrence(feb, "monthly", 1, anchor_day=31)
+    assert (mar.month, mar.day) == (3, 31)
+    apr = next_occurrence(mar, "monthly", 1, anchor_day=31)
+    assert (apr.month, apr.day) == (4, 30)
+
+
 # ─── Эндпоинты ────────────────────────────────────────────────────────────
 
 

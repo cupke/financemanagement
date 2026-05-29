@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,6 +128,34 @@ async def update_account(
       update_data = payload.model_dump(exclude_unset=True)
       if "currency_code" in update_data and update_data["currency_code"] is not None:
           update_data["currency_code"] = update_data["currency_code"].upper()
+
+      # Смена валюты счёта, по которому уже есть операции, запрещена. Суммы
+      # операций хранятся в прежней валюте (snapshot на момент создания), а
+      # balance — число без валюты; если поменять currency_code, дашборд/отчёты
+      # начнут пересчитывать тот же balance по новой валюте → искажение капитала
+      # (рубли, посчитанные как доллары). Через UI поле заблокировано, но защищаем
+      # и API. Для пустого счёта смена валюты безопасна и разрешена.
+      new_currency = update_data.get("currency_code")
+      if new_currency is not None and new_currency != account.currency_code:
+          has_tx = await session.scalar(
+              select(Transaction.id)
+              .where(
+                  or_(
+                      Transaction.account_id == account.id,
+                      Transaction.transfer_account_id == account.id,
+                  )
+              )
+              .limit(1)
+          )
+          if has_tx is not None:
+              raise HTTPException(
+                  status_code=status.HTTP_400_BAD_REQUEST,
+                  detail=(
+                      "Нельзя сменить валюту счёта, по которому уже есть операции. "
+                      "Создайте новый счёт в нужной валюте."
+                  ),
+              )
+
       # Не даём занулить opening_balance/opening_date — оба NOT NULL.
       if "opening_balance" in update_data and update_data["opening_balance"] is None:
           raise HTTPException(
