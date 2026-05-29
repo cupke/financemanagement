@@ -1,7 +1,7 @@
 """Модель User — учётная запись пользователя FinTrack."""
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -31,6 +31,17 @@ class User(Base):
     # Длина 200 символов — с запасом под формат Argon2 (обычно ~120-150).
     # Сам пароль никогда не хранится — только хэш.
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Подтверждён ли email. Регистрация создаёт пользователя с False; письмо со
+    # ссылкой пользователь запрашивает сам кнопкой на странице профиля
+    # (/resend-verification), переход по ссылке ставит True. Вход НЕ блокируется —
+    # неподтверждённый пользователь видит напоминание на профиле (мягкий сценарий).
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
 
     # Время создания записи. server_default=func.now() — БД сама проставляет
     # значение через NOW() при INSERT, не зависит от часов клиента.

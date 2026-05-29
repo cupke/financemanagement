@@ -1,6 +1,9 @@
+    import { useState } from 'react'
     import { useNavigate } from 'react-router-dom'
     import {
+      Alert,
       Avatar,
+      Badge,
       Button,
       Card,
       Container,
@@ -15,10 +18,15 @@
     import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
     import { listAccountsRequest } from '../api/accounts'
-    import { deleteAccountRequest, getMeRequest } from '../api/auth'
+    import {
+      deleteAccountRequest,
+      getMeRequest,
+      resendVerificationRequest,
+    } from '../api/auth'
     import { listCategoriesRequest } from '../api/categories'
     import { listTransactionsRequest } from '../api/transactions'
-    import { formatMoney, pluralRu } from '../lib/format'
+    import { ChangePasswordModal } from '../components/ChangePasswordModal'
+    import { pluralRu } from '../lib/format'
     import { useAuthStore } from '../stores/auth'
     import { useDocumentTitle } from '../lib/useDocumentTitle'
 
@@ -35,6 +43,7 @@
       const navigate = useNavigate()
       const clearToken = useAuthStore((state) => state.clearToken)
       const queryClient = useQueryClient()
+      const [passwordModalOpened, setPasswordModalOpened] = useState(false)
 
       const { data, isLoading, isError } = useQuery({
         queryKey: ['me'],
@@ -57,6 +66,26 @@
       const { data: transactions = [] } = useQuery({
         queryKey: ['transactions-stats'],
         queryFn: () => listTransactionsRequest({ limit: 500 }),
+      })
+
+      // Повторная отправка письма для подтверждения почты.
+      const resendMutation = useMutation({
+        mutationFn: resendVerificationRequest,
+        onSuccess: (res) => {
+          notifications.show({
+            title: 'Готово',
+            message: res.detail,
+            color: 'blue',
+          })
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onError: (error: any) => {
+          notifications.show({
+            title: 'Ошибка',
+            message: error.response?.data?.detail || 'Не удалось отправить письмо',
+            color: 'red',
+          })
+        },
       })
 
       const deleteMutation = useMutation({
@@ -126,15 +155,6 @@
         )
       }
 
-      // Общий капитал по валютам — то же вычисление, что на AccountsPage.
-      const totalsByCurrency = accounts.reduce<Record<string, number>>(
-        (acc, a) => {
-          acc[a.currency_code] = (acc[a.currency_code] ?? 0) + Number(a.balance)
-          return acc
-        },
-        {},
-      )
-
       // new Date(string).toLocaleString — pure (зависит только от строки и
       // локали браузера), безопасно вычислять прямо в render. Date.now() ниже
       // нигде не используется — отсюда и упрощение кода без useMemo/useEffect.
@@ -145,6 +165,29 @@
           <Stack gap="lg">
             <Title order={2}>Профиль</Title>
 
+            {/* Напоминание о подтверждении почты — только здесь, на профиле
+                (не глобальным баннером). Вход не блокируется (мягкий сценарий). */}
+            {!data.email_verified && (
+              <Alert color="yellow" variant="light" title="Подтвердите почту">
+                <Group justify="space-between" wrap="nowrap" gap="sm">
+                  <Text size="sm">
+                    Почта {data.email} не подтверждена. Нажмите кнопку — мы
+                    отправим письмо со ссылкой. Это нужно, чтобы можно было
+                    восстановить доступ при потере пароля.
+                  </Text>
+                  <Button
+                    variant="white"
+                    size="xs"
+                    loading={resendMutation.isPending}
+                    onClick={() => resendMutation.mutate()}
+                    style={{ flexShrink: 0 }}
+                  >
+                    Отправить письмо
+                  </Button>
+                </Group>
+              </Alert>
+            )}
+
             {/* Hero-карточка: аватар с инициалом + email + точная дата
                 регистрации. Внизу карточки — кнопка «Выйти». Логично, что
                 управление сеансом (выход) живёт рядом с заголовком профиля. */}
@@ -153,19 +196,30 @@
                   <Avatar color="blue" size="xl" radius="xl">
                     {data.email[0].toUpperCase()}
                   </Avatar>
-                  <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+                  <Stack gap={4} style={{ minWidth: 0, flex: 1 }}>
                     <Text fw={600} size="lg" truncate>
                       {data.email}
                     </Text>
                     <Text size="sm" c="dimmed">
                       Зарегистрирован: {createdAtFull}
                     </Text>
+                    {/* В шапке — компактный статус. Призыв к действию (с кнопкой
+                        повторной отправки) вынесен в плашку выше. */}
+                    <Badge
+                      color={data.email_verified ? 'green' : 'yellow'}
+                      variant="light"
+                      w="fit-content"
+                    >
+                      {data.email_verified ? '✓ почта подтверждена' : 'почта не подтверждена'}
+                    </Badge>
                   </Stack>
                 </Group>
             </Card>
 
-            {/* Статистика по аккаунту. Три цифры на одной строке + общий капитал
-                снизу. На мобильных карточки складываются вертикально (Group grow). */}
+            {/* Статистика использования аккаунта: сколько всего заведено счетов,
+                категорий и операций. Финансовую сводку (капитал, расходы) сюда
+                намеренно не дублируем — она живёт на Главной. На мобильных
+                карточки складываются вертикально (Group grow). */}
             <Card withBorder p="lg">
               <Stack gap="md">
                 <Title order={4}>Статистика</Title>
@@ -197,21 +251,23 @@
                     )}
                   />
                 </Group>
+              </Stack>
+            </Card>
 
-                {Object.keys(totalsByCurrency).length > 0 && (
-                  <Stack gap={4}>
-                    <Text size="sm" c="dimmed">
-                      Общий капитал
-                    </Text>
-                    <Group gap="md" wrap="wrap">
-                      {Object.entries(totalsByCurrency).map(([code, total]) => (
-                        <Text key={code} fw={700} size="lg">
-                          {formatMoney(total, code)}
-                        </Text>
-                      ))}
-                    </Group>
-                  </Stack>
-                )}
+            {/* Безопасность — смена пароля для залогиненного пользователя. */}
+            <Card withBorder p="lg">
+              <Stack gap="sm">
+                <Title order={4}>Безопасность</Title>
+                <Text size="sm" c="dimmed">
+                  Смена пароля требует ввода текущего пароля.
+                </Text>
+                <Button
+                  variant="light"
+                  w="fit-content"
+                  onClick={() => setPasswordModalOpened(true)}
+                >
+                  🔑 Сменить пароль
+                </Button>
               </Stack>
             </Card>
 
@@ -242,6 +298,11 @@
               </Stack>
             </Card>
           </Stack>
+
+          <ChangePasswordModal
+            opened={passwordModalOpened}
+            onClose={() => setPasswordModalOpened(false)}
+          />
         </Container>
       )
     }

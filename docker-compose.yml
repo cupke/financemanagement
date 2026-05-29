@@ -33,6 +33,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Mailhog — «фейковый» SMTP-сервер для разработки. Ловит все исходящие письма
+  # (подтверждение почты, сброс пароля) и показывает их в веб-интерфейсе,
+  # реально никуда не отправляя. Открыть письма: http://127.0.0.1:8025
+  #
+  # Сервис ОПЦИОНАЛЬНЫЙ (Docker-профиль "mail"): обычный `docker compose up -d`
+  # его НЕ поднимает. Чтобы поднять Mailhog: `docker compose --profile mail up -d`
+  # (и тогда работает дефолт SMTP_HOST=mailhog). Альтернативы без Mailhog:
+  #  - реальный SMTP — прописать SMTP_* в backend/.env;
+  #  - режим лога — EMAIL_LOG_ONLY=true (письма печатаются в лог backend).
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: fintrack-mailhog
+    restart: unless-stopped
+    profiles: ["mail"]
+    ports:
+      - "8025:8025"  # веб-интерфейс (просмотр писем)
+      - "1025:1025"  # SMTP (backend шлёт сюда)
+
   backend:
     build:
       context: ./backend
@@ -47,6 +65,12 @@ services:
       # Перебивает значение из backend/.env (env vars имеют приоритет в pydantic-settings).
       DATABASE_URL: postgresql+asyncpg://fintrack:fintrack_dev_password@db:5432/fintrack
       ENVIRONMENT: dev
+      # SMTP здесь НЕ задаём, чтобы настройки из backend/.env имели приоритет
+      # (env-переменные compose перебивают .env). По умолчанию (config.py)
+      # SMTP_HOST=mailhog — работает при `docker compose --profile mail up -d`.
+      # Реальный SMTP / режим лога настраиваются через backend/.env.
+      # URL фронтенда для ссылок в письмах — адрес, который открывает браузер.
+      FRONTEND_BASE_URL: http://127.0.0.1:60001
       # Чтобы логи python печатались в реальном времени, без буферизации.
       PYTHONUNBUFFERED: "1"
     ports:

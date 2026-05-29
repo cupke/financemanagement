@@ -178,7 +178,9 @@
         </AppShell.Navbar>
 
         <AppShell.Main>
-          {/* Outlet — точка вставки дочерних роутов (см. App.tsx) */}
+          {/* Outlet — точка вставки дочерних роутов (см. App.tsx).
+              Напоминание о подтверждении почты живёт на странице профиля
+              (MePage), а не глобально. */}
           <Outlet />
         </AppShell.Main>
       </AppShell>

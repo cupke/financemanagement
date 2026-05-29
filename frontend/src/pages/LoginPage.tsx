@@ -96,6 +96,14 @@ import { Link, useNavigate } from 'react-router-dom'
               required
               {...form.getInputProps('password')}
             />
+            <Anchor
+              component={Link}
+              to="/forgot-password"
+              size="sm"
+              style={{ alignSelf: 'flex-end' }}
+            >
+              Забыли пароль?
+            </Anchor>
             <Button type="submit" loading={loginMutation.isPending}>
               Войти
             </Button>

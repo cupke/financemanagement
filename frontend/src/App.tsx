@@ -2,6 +2,9 @@
 
   import { LoginPage } from './pages/LoginPage'
   import { RegisterPage } from './pages/RegisterPage'
+  import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+  import { ResetPasswordPage } from './pages/ResetPasswordPage'
+  import { VerifyEmailPage } from './pages/VerifyEmailPage'
   import { MePage } from './pages/MePage'
   import { AccountsPage } from './pages/AccountsPage'
   import { CategoriesPage } from './pages/CategoriesPage'
@@ -28,6 +31,9 @@ import { RecurringPage } from './pages/RecurringPage'
         {/* Публичные страницы */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
 
         {/* Защищённая группа: токен проверяется один раз на уровне ProtectedRoute,
             AppLayout даёт sidebar+header, дочерние роуты подставляются через Outlet. */}

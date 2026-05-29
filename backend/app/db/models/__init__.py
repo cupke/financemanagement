@@ -7,6 +7,7 @@
     """
 from app.db.models.account import Account
 from app.db.models.category import Category
+from app.db.models.email_token import EmailToken
 from app.db.models.exchange_rate import ExchangeRate
 from app.db.models.recurring_transaction import RecurringTransaction
 from app.db.models.transaction import Transaction

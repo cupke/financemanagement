@@ -54,6 +54,41 @@ class Settings(BaseSettings):
           description="Origin'ы, которым разрешён доступ к API",
       )
 
+      # --- Отправка email (подтверждение почты, сброс пароля) ---
+      # В dev поднимаем Mailhog в docker-compose: он ловит ВСЕ письма и
+      # показывает их в веб-интерфейсе (http://127.0.0.1:8025), реально никуда
+      # не отправляя. Внутри compose-сети backend обращается к нему по имени
+      # сервиса `mailhog`. В production сюда подставляется реальный SMTP.
+      smtp_host: str = Field(default="mailhog", description="SMTP-хост")
+      smtp_port: int = Field(default=1025, description="SMTP-порт")
+      smtp_username: str = Field(default="", description="SMTP-логин (пусто = без авторизации)")
+      smtp_password: str = Field(default="", description="SMTP-пароль")
+      # Два режима шифрования (взаимоисключающие):
+      #  - smtp_use_tls (STARTTLS) — обычный порт 587 (Gmail, многие провайдеры);
+      #  - smtp_use_ssl (implicit SSL) — порт 465 (Яндекс).
+      # Mailhog/лог-режим — оба False.
+      smtp_use_tls: bool = Field(default=False, description="STARTTLS на порту 587")
+      smtp_use_ssl: bool = Field(default=False, description="Implicit SSL на порту 465")
+      smtp_from: str = Field(
+          default="FinTrack <no-reply@fintrack.local>",
+          description="Адрес отправителя в письмах",
+      )
+      # Режим «письма в лог»: ничего не отправляем по SMTP, а печатаем письмо
+      # (включая ссылку) в лог приложения. Удобно в окружениях без почтового
+      # сервера (например, когда недоступен Docker Hub для образа Mailhog) —
+      # ссылку для подтверждения/сброса читаем в `docker compose logs backend`.
+      # Аналог «console email backend» в Django. В production — False.
+      email_log_only: bool = Field(default=False, description="Печатать письма в лог вместо SMTP")
+      # URL фронтенда — по нему строятся ссылки в письмах. ВАЖНО: это адрес,
+      # который открывает БРАУЗЕР пользователя, а не внутреннее имя в compose.
+      frontend_base_url: str = Field(
+          default="http://127.0.0.1:60001",
+          description="Базовый URL фронтенда для ссылок в письмах",
+      )
+      # Время жизни одноразовых токенов.
+      email_verify_token_ttl_hours: int = Field(default=24)
+      password_reset_token_ttl_hours: int = Field(default=1)
+
       model_config = SettingsConfigDict(
           env_file=".env",
           env_file_encoding="utf-8",

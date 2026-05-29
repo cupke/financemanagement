@@ -8,8 +8,15 @@
   export interface UserRead {
     id: number
     email: string
+    // Подтверждён ли email (ссылкой из письма). Влияет на баннер-напоминание.
+    email_verified: boolean
     // FastAPI сериализует datetime в ISO-8601, например "2026-05-09T20:14:00".
     created_at: string
+  }
+
+  // Ответ-сообщение от операций без полезной нагрузки (MessageResponse на бэке).
+  export interface MessageResponse {
+    detail: string
   }
 
   export interface TokenResponse {
@@ -58,4 +65,60 @@
     // должен очистить токен и редиректить на /login.
     export async function deleteAccountRequest(): Promise<void> {
       await apiClient.delete('/api/v1/users/me')
+    }
+
+    // POST /api/v1/auth/change-password — сменить пароль (для залогиненного).
+    export async function changePasswordRequest(
+      currentPassword: string,
+      newPassword: string,
+    ): Promise<MessageResponse> {
+      const { data } = await apiClient.post<MessageResponse>(
+        '/api/v1/auth/change-password',
+        { current_password: currentPassword, new_password: newPassword },
+      )
+      return data
+    }
+
+    // POST /api/v1/auth/forgot-password — запросить ссылку для сброса пароля.
+    // Ответ всегда одинаковый (anti-enumeration), токена в нём нет.
+    export async function forgotPasswordRequest(
+      email: string,
+    ): Promise<MessageResponse> {
+      const { data } = await apiClient.post<MessageResponse>(
+        '/api/v1/auth/forgot-password',
+        { email },
+      )
+      return data
+    }
+
+    // POST /api/v1/auth/reset-password — задать новый пароль по токену из письма.
+    export async function resetPasswordRequest(
+      token: string,
+      newPassword: string,
+    ): Promise<MessageResponse> {
+      const { data } = await apiClient.post<MessageResponse>(
+        '/api/v1/auth/reset-password',
+        { token, new_password: newPassword },
+      )
+      return data
+    }
+
+    // POST /api/v1/auth/verify-email — подтвердить почту по токену из письма.
+    export async function verifyEmailRequest(
+      token: string,
+    ): Promise<MessageResponse> {
+      const { data } = await apiClient.post<MessageResponse>(
+        '/api/v1/auth/verify-email',
+        { token },
+      )
+      return data
+    }
+
+    // POST /api/v1/auth/resend-verification — повторно выслать письмо
+    // подтверждения (для залогиненного пользователя).
+    export async function resendVerificationRequest(): Promise<MessageResponse> {
+      const { data } = await apiClient.post<MessageResponse>(
+        '/api/v1/auth/resend-verification',
+      )
+      return data
     }
