@@ -22,7 +22,9 @@ export function VerifyEmailPage() {
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token')
-  const [status, setStatus] = useState<Status>('pending')
+  // Начальный статус выводим из наличия токена: нет токена → сразу 'error'
+  // (без синхронного setState в эффекте — этого требует react-hooks).
+  const [status, setStatus] = useState<Status>(token ? 'pending' : 'error')
   // Защита от двойного вызова в React StrictMode (dev): иначе второй вызов
   // получит «токен уже использован» и покажет ошибку поверх успеха.
   const started = useRef(false)
@@ -30,10 +32,7 @@ export function VerifyEmailPage() {
   useEffect(() => {
     if (started.current) return
     started.current = true
-    if (!token) {
-      setStatus('error')
-      return
-    }
+    if (!token) return  // статус уже 'error' из начального значения
     verifyEmailRequest(token)
       .then(() => {
         setStatus('success')

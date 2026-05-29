@@ -6,7 +6,6 @@ Authorization: Bearer <token>. Все защищённые эндпоинты б
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User

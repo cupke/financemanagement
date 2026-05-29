@@ -13,3 +13,16 @@ from app.db.models.exchange_rate import ExchangeRate
 from app.db.models.recurring_transaction import RecurringTransaction
 from app.db.models.transaction import Transaction
 from app.db.models.user import User
+
+# Импорты выше нужны ради регистрации таблиц в Base.metadata (не «мёртвые»).
+# __all__ делает реэкспорт явным: `from app.db.models import Account` и т.п.
+__all__ = [
+    "Account",
+    "Budget",
+    "Category",
+    "EmailToken",
+    "ExchangeRate",
+    "RecurringTransaction",
+    "Transaction",
+    "User",
+]
