@@ -278,9 +278,19 @@ async def recompute_account_balance(
       )
       source_sum = await session.scalar(source_sum_stmt) or Decimal("0")
 
-      # 2. Эффект переводов, где счёт — получатель. Всегда +amount.
+      # 2. Эффект переводов, где счёт — получатель. Зачисляется target_amount
+      #    (сумма в валюте получателя для кросс-валютного перевода); для
+      #    одновалютного перевода target_amount = NULL → берём amount.
+      #    Без coalesce кросс-валютный перевод зачислил бы сумму в валюте
+      #    источника — рассинхрон баланса (инкрементальный путь в transactions.py
+      #    уже использует credited = target_amount|amount, см. delete/PATCH).
       target_sum_stmt = select(
-          func.coalesce(func.sum(Transaction.amount), Decimal("0"))
+          func.coalesce(
+              func.sum(
+                  func.coalesce(Transaction.target_amount, Transaction.amount)
+              ),
+              Decimal("0"),
+          )
       ).where(
           Transaction.transfer_account_id == account.id,
           Transaction.kind == "transfer",

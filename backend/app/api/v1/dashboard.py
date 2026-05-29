@@ -34,11 +34,20 @@ class DashboardSummary(BaseModel):
     total_capital_rub: Decimal = Field(
         ..., description="Сумма балансов всех счетов в RUB по курсу ЦБ"
     )
+    capital_incomplete: bool = Field(
+        default=False,
+        description=(
+            "True, если для части валютных счетов нет курса ЦБ — тогда они не "
+            "вошли в total_capital_rub и сумма занижена (фронт показывает пометку)."
+        ),
+    )
     accounts_count: int
     spent_this_month_rub: Decimal = Field(
         ..., description="Все расходы за текущий месяц в RUB"
     )
-    transactions_this_month: int
+    # Кол-во расходных операций за месяц (число под суммой «Потрачено»).
+    # Именно расходы, а не все операции — чтобы оно билось с суммой выше.
+    expenses_this_month: int
     top_categories: list[CategorySpending] = Field(
         ..., description="Топ-3 категории расходов за текущий месяц"
     )
@@ -90,6 +99,15 @@ async def get_summary(
         total_capital += await to_rub(acc.balance, acc.currency_code, today)
     total_capital = total_capital.quantize(Decimal("0.01"))
 
+    # Если для валютного счёта не нашлось курса (rate=0), его баланс дал вклад 0 —
+    # капитал занижен. Сообщаем фронту, чтобы он честно это пометил (а не молча
+    # показал заниженную сумму).
+    capital_incomplete = any(
+        acc.currency_code.upper() != "RUB"
+        and rate_cache.get((acc.currency_code.upper(), today), Decimal("0")) == 0
+        for acc in accounts
+    )
+
     # 3. Расходы за текущий месяц.
     expenses = (
         await session.execute(
@@ -137,8 +155,9 @@ async def get_summary(
 
     return DashboardSummary(
         total_capital_rub=total_capital,
+        capital_incomplete=capital_incomplete,
         accounts_count=len(accounts),
         spent_this_month_rub=spent_total,
-        transactions_this_month=len(expenses),
+        expenses_this_month=len(expenses),
         top_categories=top_categories,
     )

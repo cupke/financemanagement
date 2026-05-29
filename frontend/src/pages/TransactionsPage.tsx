@@ -179,6 +179,11 @@
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
         queryClient.invalidateQueries({ queryKey: ['accounts'] })
+        // Производные виджеты — те же, что при создании операции.
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+        queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+        queryClient.invalidateQueries({ queryKey: ['budgets'] })
+        queryClient.invalidateQueries({ queryKey: ['transactions-stats'] })
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {
@@ -506,6 +511,14 @@
                 {meta.sign}
                 {formatMoney(tx.amount, tx.currency_code)}
               </Text>
+              {/* Кросс-валютный перевод: под суммой списания показываем, сколько
+                  зачислено на счёт-получатель (в его валюте). Без этого видна
+                  только сумма списания, и пользователь не знает, сколько пришло. */}
+              {tx.target_amount !== null && toAccount && (
+                <Text size="sm" c="dimmed">
+                  → {formatMoney(tx.target_amount, toAccount.currency_code)}
+                </Text>
+              )}
               <Text size="xs" c="dimmed">
                 {meta.label}
               </Text>

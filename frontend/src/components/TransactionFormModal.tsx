@@ -204,6 +204,13 @@
           color: 'green',
         })
         queryClient.invalidateQueries({ queryKey: ['transactions'] })
+        // Производные виджеты зависят от операций: дашборд, отчёты, бюджеты,
+        // статистика истории. Инвалидируем их и при create, и при edit
+        // (правка категории/даты меняет разбивку по категориям и периодам).
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+        queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+        queryClient.invalidateQueries({ queryKey: ['budgets'] })
+        queryClient.invalidateQueries({ queryKey: ['transactions-stats'] })
         // При CREATE балансы изменились на бэке — нужно перезапросить
         // /accounts, иначе страница счетов покажет старые суммы. При PATCH
         // балансы не трогаются, но invalidate безвреден (просто лишний GET).

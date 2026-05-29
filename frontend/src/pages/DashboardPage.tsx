@@ -19,6 +19,7 @@ import { listAccountsRequest } from '../api/accounts'
 import { listCategoriesRequest } from '../api/categories'
 import { listBudgetsRequest } from '../api/budgets'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { pluralRu } from '../lib/format'
 
 const RUB = new Intl.NumberFormat('ru-RU', {
   style: 'currency',
@@ -108,8 +109,16 @@ export function DashboardPage() {
             {RUB.format(Number(summary.data.total_capital_rub))}
           </Text>
           <Text size="xs" c="dimmed" mt="xs">
-            по {summary.data.accounts_count} счетам, курс ЦБ РФ
+            по {summary.data.accounts_count}{' '}
+            {pluralRu(summary.data.accounts_count, 'счёту', 'счетам', 'счетам')},
+            курс ЦБ РФ
           </Text>
+          {summary.data.capital_incomplete && (
+            <Text size="xs" c="orange" mt={4}>
+              ⚠ Для части валютных счетов нет курса ЦБ — сумма занижена.
+              Загляните на страницу «Курсы».
+            </Text>
+          )}
         </Card>
 
         <Card withBorder p="lg">
@@ -120,7 +129,13 @@ export function DashboardPage() {
             {RUB.format(Number(summary.data.spent_this_month_rub))}
           </Text>
           <Text size="xs" c="dimmed" mt="xs">
-            {summary.data.transactions_this_month} операций
+            {summary.data.expenses_this_month}{' '}
+            {pluralRu(
+              summary.data.expenses_this_month,
+              'расход',
+              'расхода',
+              'расходов',
+            )}
           </Text>
         </Card>
 

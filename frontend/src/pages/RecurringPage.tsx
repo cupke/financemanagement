@@ -103,11 +103,15 @@ export function RecurringPage() {
             : 'Новых операций по расписанию пока нет',
         color: result.created > 0 ? 'green' : 'blue',
       })
-      // Создались операции → балансы и история поменялись.
+      // Создались операции → балансы, история, дашборд, отчёты и бюджеты
+      // поменялись. Ключ дашборда — 'dashboard-summary' (а не 'dashboard',
+      // под которым ничего не кэшируется).
       queryClient.invalidateQueries({ queryKey: ['recurring'] })
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+      queryClient.invalidateQueries({ queryKey: ['budgets'] })
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {
@@ -133,6 +137,15 @@ export function RecurringPage() {
       })
       queryClient.invalidateQueries({ queryKey: ['recurring'] })
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Ошибка',
+        message:
+          error.response?.data?.detail || 'Не удалось изменить правило',
+        color: 'red',
+      })
+    },
   })
 
   const deleteMutation = useMutation({
@@ -144,6 +157,14 @@ export function RecurringPage() {
         color: 'blue',
       })
       queryClient.invalidateQueries({ queryKey: ['recurring'] })
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError: (error: any) => {
+      notifications.show({
+        title: 'Ошибка',
+        message: error.response?.data?.detail || 'Не удалось удалить правило',
+        color: 'red',
+      })
     },
   })
 
@@ -267,9 +288,19 @@ export function RecurringPage() {
                         📂 {catName}
                       </Text>
                     )}
-                    <Text size="sm" c={rule.is_active ? 'dimmed' : 'gray'}>
-                      ⏭ Следующая: {formatDateTime(rule.next_run_at)}
-                    </Text>
+                    {/* «Следующую» показываем только у активных правил. У
+                        правила на паузе курсор next_run_at не двигается и
+                        обычно «застрял» в прошлом — показывать его как
+                        «следующую дату» вводит в заблуждение. */}
+                    {rule.is_active ? (
+                      <Text size="sm" c="dimmed">
+                        ⏭ Следующая: {formatDateTime(rule.next_run_at)}
+                      </Text>
+                    ) : (
+                      <Text size="sm" c="gray">
+                        ⏸ На паузе
+                      </Text>
+                    )}
                     {rule.last_run_at && (
                       <Text size="sm" c="dimmed">
                         ✅ Последний запуск: {formatDateTime(rule.last_run_at)}

@@ -164,6 +164,40 @@ async def test_same_currency_transfer_stores_null_target_amount(
     assert await _balance(client, auth_headers, b) == "400.00"
 
 
+async def test_recompute_balance_uses_target_amount(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    # Регрессия: полный пересчёт (recompute_account_balance) для счёта-получателя
+    # должен брать target_amount, а не amount. Иначе после правки opening_balance
+    # кросс-валютный перевод зачислит сумму в валюте источника (рубли как доллары).
+    rub = await _create_account(client, auth_headers, "Рубли", "50000", "RUB")
+    usd = await _create_account(client, auth_headers, "Доллары", "200", "USD")
+
+    await client.post(
+        "/api/v1/transactions",
+        json={
+            "kind": "transfer",
+            "account_id": rub,
+            "transfer_account_id": usd,
+            "amount": "9000",
+            "target_amount": "100",
+            "occurred_at": _now_iso(),
+        },
+        headers=auth_headers,
+    )
+    assert await _balance(client, auth_headers, usd) == "300.00"
+
+    # PATCH opening_balance (тем же значением) триггерит полный пересчёт.
+    resp = await client.patch(
+        f"/api/v1/accounts/{usd}",
+        json={"opening_balance": "200"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    # Должно остаться 300 (200 + 100 зачисленных), а НЕ 9200 (200 + 9000).
+    assert await _balance(client, auth_headers, usd) == "300.00"
+
+
 async def test_target_amount_rejected_for_income(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:

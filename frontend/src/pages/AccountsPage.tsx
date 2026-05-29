@@ -68,6 +68,12 @@
             color: 'blue',
           })
           queryClient.invalidateQueries({ queryKey: ['accounts'] })
+          // Удаление счёта каскадом сносит его операции → обновляем всё
+          // производное: история, дашборд, отчёты, бюджеты.
+          queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+          queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+          queryClient.invalidateQueries({ queryKey: ['budgets'] })
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onError: (error: any) => {

@@ -54,10 +54,13 @@
               message: `Добавлено по расписанию: ${result.created}`,
               color: 'green',
             })
-            // Балансы и история изменились — обновляем кеши.
+            // Балансы и история изменились — обновляем кеши. Ключ дашборда —
+            // 'dashboard-summary' (под 'dashboard' ничего не кэшируется).
             queryClient.invalidateQueries({ queryKey: ['accounts'] })
             queryClient.invalidateQueries({ queryKey: ['transactions'] })
-            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+            queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
+            queryClient.invalidateQueries({ queryKey: ['budgets'] })
             queryClient.invalidateQueries({ queryKey: ['recurring'] })
           }
         })

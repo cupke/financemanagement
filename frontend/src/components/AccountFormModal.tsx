@@ -126,6 +126,10 @@
           // При создании транзакций список тоже мог измениться (формат отображения
           // валюты, например) — инвалидируем для надёжности.
           queryClient.invalidateQueries({ queryKey: ['transactions'] })
+          // Капитал на дашборде и капитал по счетам в отчётах зависят от счетов
+          // (правка opening_balance/валюты меняет суммы).
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+          queryClient.invalidateQueries({ queryKey: ['reports-overview'] })
           form.reset()
           onClose()
         },
