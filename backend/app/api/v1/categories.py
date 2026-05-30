@@ -150,6 +150,26 @@ async def update_category(
                           f"с типом нового родителя ({new_parent.kind})."
                       ),
                   )
+              # Защита от цикла (C1): новый родитель не должен быть потомком самой
+              # категории. Идём вверх по цепочке предков нового родителя; если
+              # встретили саму категорию — перемещение создало бы цикл (A→B→A).
+              # seen-множество страхует от уже существующего цикла в данных.
+              ancestor_id = new_parent.parent_id
+              seen: set[int] = {new_parent.id}
+              while ancestor_id is not None and ancestor_id not in seen:
+                  if ancestor_id == category.id:
+                      raise HTTPException(
+                          status_code=status.HTTP_400_BAD_REQUEST,
+                          detail=(
+                              "Нельзя переместить категорию в её собственное "
+                              "поддерево — это создало бы цикл."
+                          ),
+                      )
+                  seen.add(ancestor_id)
+                  ancestor = await session.get(Category, ancestor_id)
+                  if ancestor is None:
+                      break
+                  ancestor_id = ancestor.parent_id
   
       for field, value in update_data.items():
           setattr(category, field, value)

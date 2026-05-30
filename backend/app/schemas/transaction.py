@@ -46,10 +46,18 @@ class TransactionCreate(BaseModel):
       """
       kind: TransactionKind
       account_id: int
-      amount: Decimal = Field(..., gt=0, description="Положительная сумма (для перевода — сумма списания)")
+      amount: Decimal = Field(
+          ...,
+          gt=0,
+          max_digits=15,
+          decimal_places=2,
+          description="Положительная сумма (для перевода — сумма списания)",
+      )
       target_amount: Decimal | None = Field(
           default=None,
           gt=0,
+          max_digits=15,
+          decimal_places=2,
           description=(
               "Сумма зачисления на счёт-получатель в его валюте. Указывается "
               "ТОЛЬКО для кросс-валютного перевода (валюты счетов различаются). "

@@ -23,7 +23,9 @@ class RecurringTransactionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     kind: RecurringKind
     account_id: int
-    amount: Decimal = Field(..., gt=0, description="Положительная сумма")
+    amount: Decimal = Field(
+        ..., gt=0, max_digits=15, decimal_places=2, description="Положительная сумма"
+    )
     currency_code: str | None = Field(
         default=None,
         min_length=3,
@@ -81,7 +83,7 @@ class RecurringTransactionUpdate(BaseModel):
     обновляются только переданные (model_fields_set в роутере).
     """
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    amount: Decimal | None = Field(default=None, gt=0)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     note: str | None = Field(default=None, max_length=500)
     frequency: RecurrenceFrequency | None = None
     interval: int | None = Field(default=None, ge=1)

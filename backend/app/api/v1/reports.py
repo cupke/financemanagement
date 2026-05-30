@@ -30,6 +30,7 @@ from app.db.models.exchange_rate import ExchangeRate
 from app.db.models.transaction import Transaction
 from app.db.models.user import User
 from app.db.session import get_session
+from app.services.ledger import ensure_aware_utc
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -161,6 +162,14 @@ async def get_overview(
     # источника). В режиме одного счёта здесь будет лишь он сам — этого хватает,
     # потому что чужая «нога» в scope_ids всё равно не попадает.
     currency_by_account = {a.id: a.currency_code for a in accounts}
+    # opening_date каждого счёта (приведён к aware-UTC). Нужен, чтобы линия
+    # баланса в отчёте считала движение по счёту ТОЛЬКО если occurred_at >=
+    # opening_date — ровно как реальный account.balance (модель «opening_balance
+    # + движения»). Иначе ретро-операция «до даты остатка», чей эффект уже
+    # сидит в opening_balance (baseline), посчиталась бы повторно (находка B1).
+    opening_by_account = {
+        a.id: ensure_aware_utc(a.opening_date) for a in accounts
+    }
 
     # Валюта отчёта: один счёт — его валюта; все счета — рубли.
     display_currency = accounts[0].currency_code.upper() if account_id is not None else "RUB"
@@ -280,9 +289,12 @@ async def get_overview(
     delta_by_bucket = [Decimal("0")] * n_buckets
     for kind, amount, currency, occurred_at, acc_id, transfer_acc_id, target_amount in bal_rows:
         delta = Decimal("0")
+        occurred_aware = ensure_aware_utc(occurred_at)
         # Списание/зачисление по основному счёту операции (источник).
-        # amount — в валюте источника (= currency_code транзакции).
-        if acc_id in scope_ids:
+        # amount — в валюте источника (= currency_code транзакции). Учитываем
+        # только если операция не раньше opening_date счёта (иначе её эффект уже
+        # в baseline — см. B1).
+        if acc_id in scope_ids and occurred_aware >= opening_by_account[acc_id]:
             val = await convert(amount, currency, occurred_at.date())
             if kind == "income":
                 delta += val
@@ -293,7 +305,12 @@ async def get_overview(
         # «Вторая нога» перевода — зачисление на получателя. Для кросс-валютного
         # перевода это target_amount в валюте ПОЛУЧАТЕЛЯ; для одновалютного —
         # тот же amount (target_amount = NULL). Конвертируем по валюте получателя.
-        if kind == "transfer" and transfer_acc_id in scope_ids:
+        # Тот же фильтр по opening_date получателя.
+        if (
+            kind == "transfer"
+            and transfer_acc_id in scope_ids
+            and occurred_aware >= opening_by_account[transfer_acc_id]
+        ):
             credited = target_amount if target_amount is not None else amount
             target_currency = currency_by_account.get(transfer_acc_id, currency)
             delta += await convert(credited, target_currency, occurred_at.date())
