@@ -22,6 +22,14 @@
       parent_id?: number | null
     }
 
+    // Тело PATCH /api/v1/categories/{id}. kind менять нельзя (бэк это запрещает —
+    // сменился бы тип у уже привязанных операций). parent_id: number — перенести
+    // под другого родителя, null — сделать корневой, поле опущено — не трогать.
+    export interface CategoryUpdate {
+      name?: string
+      parent_id?: number | null
+    }
+
     // GET /api/v1/categories → плоский список всех категорий юзера.
     // Иерархию (дерево) клиент строит сам из parent_id — это экономит запросы
     // (не нужно делать N запросов «дай детей категории X» рекурсивно).
@@ -47,6 +55,20 @@
       return data
     }
   
+    // PATCH /api/v1/categories/{id} → обновлённая категория. Переименование
+    // (name) и/или перенос под другого родителя (parent_id). Бэк проверяет
+    // принадлежность, совпадение kind с новым родителем и отвергает циклы.
+    export async function updateCategoryRequest(
+      id: number,
+      payload: CategoryUpdate,
+    ): Promise<CategoryRead> {
+      const { data } = await apiClient.patch<CategoryRead>(
+        `/api/v1/categories/${id}`,
+        payload,
+      )
+      return data
+    }
+
     // DELETE /api/v1/categories/{id} → 204. На бэке стоит ON DELETE CASCADE —
     // все вложенные категории (потомки любой глубины) удалятся каскадно.
     export async function deleteCategoryRequest(id: number): Promise<void> {

@@ -52,16 +52,18 @@
       childrenMap: Map<number | null, CategoryRead[]>
       expanded: Set<number>
       onToggle: (id: number) => void
+      onEdit: (cat: CategoryRead) => void
       onDelete: (cat: CategoryRead) => void
       deletingId: number | undefined
     }
-  
+
     function CategoryRow({
       category,
       depth,
       childrenMap,
       expanded,
       onToggle,
+      onEdit,
       onDelete,
       deletingId,
     }: RowProps) {
@@ -94,15 +96,24 @@
                   {category.name}
                 </Text>
               </Group>
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                aria-label="Удалить категорию"
-                onClick={() => onDelete(category)}
-                loading={deletingId === category.id}
-              >
-                🗑️ 
-              </ActionIcon>
+              <Group gap={4} wrap="nowrap">
+                <ActionIcon
+                  variant="subtle"
+                  aria-label="Редактировать категорию"
+                  onClick={() => onEdit(category)}
+                >
+                  ✏️
+                </ActionIcon>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label="Удалить категорию"
+                  onClick={() => onDelete(category)}
+                  loading={deletingId === category.id}
+                >
+                  🗑️
+                </ActionIcon>
+              </Group>
             </Group>
           </Card>
           {isExpanded &&
@@ -114,6 +125,7 @@
                 childrenMap={childrenMap}
                 expanded={expanded}
                 onToggle={onToggle}
+                onEdit={onEdit}
                 onDelete={onDelete}
                 deletingId={deletingId}
               />
@@ -129,14 +141,16 @@
       kind: CategoryKind
       categories: CategoryRead[]
       onAdd: () => void
+      onEdit: (cat: CategoryRead) => void
       onDelete: (cat: CategoryRead) => void
       deletingId: number | undefined
     }
-  
+
     function CategoryTree({
       kind,
       categories,
       onAdd,
+      onEdit,
       onDelete,
       deletingId,
     }: TreeProps) {
@@ -181,6 +195,7 @@
               childrenMap={childrenMap}
               expanded={expanded}
               onToggle={toggleExpand}
+              onEdit={onEdit}
               onDelete={onDelete}
               deletingId={deletingId}
             />
@@ -192,9 +207,24 @@
     export function CategoriesPage() {
       useDocumentTitle('Категории')
       const [modalOpened, setModalOpened] = useState(false)
+      // Категория, которую сейчас редактируем (null — режим создания).
+      const [editingCategory, setEditingCategory] = useState<CategoryRead | null>(
+        null,
+      )
       // Текущая вкладка — определяет, с каким kind открывается форма создания.
       const [activeKind, setActiveKind] = useState<CategoryKind>('expense')
       const queryClient = useQueryClient()
+
+      // Открыть модалку в режиме создания (сбросив возможную редактируемую).
+      const openCreate = () => {
+        setEditingCategory(null)
+        setModalOpened(true)
+      }
+      // Открыть модалку в режиме редактирования конкретной категории.
+      const handleEdit = (category: CategoryRead) => {
+        setEditingCategory(category)
+        setModalOpened(true)
+      }
 
       const { data: categories, isLoading, isError } = useQuery({
         queryKey: ['categories'],
@@ -270,7 +300,7 @@
         <Container size="md" py="xl">
           <Group justify="space-between" mb="lg">
             <Title order={2}>Категории</Title>
-            <Button onClick={() => setModalOpened(true)}>
+            <Button onClick={openCreate}>
               + Добавить категорию
             </Button>
           </Group>
@@ -322,7 +352,8 @@
               <CategoryTree
                 kind="expense"
                 categories={expenseCategories}
-                onAdd={() => setModalOpened(true)}
+                onAdd={openCreate}
+                onEdit={handleEdit}
                 onDelete={handleDelete}
                 deletingId={deleteMutation.variables}
               />
@@ -332,7 +363,8 @@
               <CategoryTree
                 kind="income"
                 categories={incomeCategories}
-                onAdd={() => setModalOpened(true)}
+                onAdd={openCreate}
+                onEdit={handleEdit}
                 onDelete={handleDelete}
                 deletingId={deleteMutation.variables}
               />
@@ -341,8 +373,12 @@
 
           <CategoryFormModal
             opened={modalOpened}
-            onClose={() => setModalOpened(false)}
+            onClose={() => {
+              setModalOpened(false)
+              setEditingCategory(null)
+            }}
             initialKind={activeKind}
+            category={editingCategory}
           />
         </Container>
       )
