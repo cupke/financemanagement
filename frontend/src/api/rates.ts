@@ -24,11 +24,3 @@
       const { data } = await apiClient.get<RatesListResponse>('/api/v1/rates')
       return data
     }
-
-    // GET /api/v1/rates/{code} — курс конкретной валюты по коду ISO 4217.
-    export async function getRateRequest(charCode: string): Promise<RateRead> {
-      const { data } = await apiClient.get<RateRead>(
-        `/api/v1/rates/${encodeURIComponent(charCode)}`,
-      )
-      return data
-    }

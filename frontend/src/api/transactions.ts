@@ -90,15 +90,6 @@
     return data
   }
 
-  export async function getTransactionRequest(
-    id: number,
-  ): Promise<TransactionRead> {
-    const { data } = await apiClient.get<TransactionRead>(
-      `/api/v1/transactions/${id}`,
-    )
-    return data
-  }
-
       // PATCH /api/v1/transactions/{id}. Балансы НЕ меняются — только
     // безопасные поля. См. TransactionUpdate выше.
     export async function updateTransactionRequest(

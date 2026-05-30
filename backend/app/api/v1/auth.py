@@ -193,7 +193,15 @@ async def resend_verification(
         settings.email_verify_token_ttl_hours,
     )
     await session.commit()
-    await email_service.send_verification_email(current_user.email, raw_token)
+    # В отличие от /forgot-password (там ответ намеренно одинаковый ради
+    # анти-энумерации), здесь пользователь уже залогинен — можно честно
+    # сообщить, что письмо не ушло, чтобы он не ждал его впустую.
+    sent = await email_service.send_verification_email(current_user.email, raw_token)
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось отправить письмо. Попробуйте позже.",
+        )
     return MessageResponse(detail="Письмо отправлено")
 
 
