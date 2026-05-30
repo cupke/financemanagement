@@ -76,12 +76,26 @@ async def consume_token(
     )
     if token is None or token.used_at is not None:
         return None
-    # expires_at из БД — tz-aware; сравниваем по UTC.
+    # expires_at из БД — tz-aware; сравниваем по UTC. Проверку срока оставляем
+    # в Python (а не в SQL), чтобы не зависеть от того, как драйвер хранит
+    # TIMESTAMPTZ (на SQLite — naive).
     expires_at = token.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if expires_at < datetime.now(timezone.utc):
         return None
 
-    token.used_at = datetime.now(timezone.utc)
-    return token.owner_id
+    # Атомарное «застолбление»: помечаем used_at ТОЛЬКО если токен ещё не
+    # использован. Условие `used_at IS NULL` в самом UPDATE + RETURNING
+    # защищает от гонки двойного гашения: если два запроса пришли с одним
+    # токеном одновременно, выиграет ровно один (его UPDATE затронет строку и
+    # вернёт owner_id), второй получит 0 строк → None. Без этого оба прочитали
+    # бы used_at=None и оба прошли бы (например, двойной сброс пароля).
+    result = await session.execute(
+        update(EmailToken)
+        .where(EmailToken.id == token.id)
+        .where(EmailToken.used_at.is_(None))
+        .values(used_at=datetime.now(timezone.utc))
+        .returning(EmailToken.owner_id)
+    )
+    return result.scalar_one_or_none()

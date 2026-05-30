@@ -1,7 +1,22 @@
 """Схемы пользователя для входящих запросов и исходящих ответов API."""
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+def _validate_password_strength(value: str) -> str:
+    """Базовая политика пароля: минимум одна буква и одна цифра.
+
+    Длину (>= 8) проверяет Field(min_length=8) у каждого поля-пароля. Здесь —
+    минимальная защита от паролей вида "12345678" / "passwordpassword".
+    Полную политику (спецсимволы, проверка по словарю утечек) можно добавить
+    позже отдельным валидатором — для self-hosted MVP этого достаточно.
+    """
+    if not any(c.isalpha() for c in value):
+        raise ValueError("Пароль должен содержать хотя бы одну букву")
+    if not any(c.isdigit() for c in value):
+        raise ValueError("Пароль должен содержать хотя бы одну цифру")
+    return value
 
 
 class UserCreate(BaseModel):
@@ -18,8 +33,10 @@ class UserCreate(BaseModel):
         ...,
         min_length=8,
         max_length=128,
-        description="Пароль в открытом виде, минимум 8 символов",
+        description="Пароль в открытом виде, минимум 8 символов (буква + цифра)",
     )
+
+    _check_password = field_validator("password")(_validate_password_strength)
 
 
 class UserLogin(BaseModel):
@@ -56,6 +73,8 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128)
     new_password: str = Field(..., min_length=8, max_length=128)
 
+    _check_new_password = field_validator("new_password")(_validate_password_strength)
+
 
 class ForgotPasswordRequest(BaseModel):
     """Тело POST /auth/forgot-password — запрос ссылки на сброс пароля."""
@@ -68,6 +87,8 @@ class ResetPasswordRequest(BaseModel):
 
     token: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8, max_length=128)
+
+    _check_new_password = field_validator("new_password")(_validate_password_strength)
 
 
 class VerifyEmailRequest(BaseModel):

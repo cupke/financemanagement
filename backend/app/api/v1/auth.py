@@ -9,6 +9,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -38,6 +39,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Назначения токенов — строки, совпадающие с CHECK на модели EmailToken.
 _PURPOSE_VERIFY = "verify_email"
 _PURPOSE_RESET = "reset_password"
+
+# Фиктивный Argon2-хэш, против которого «вхолостую» проверяем пароль, когда
+# пользователя с таким email нет. Argon2-проверка занимает десятки мс; без неё
+# ответ на несуществующий email возвращался бы заметно быстрее, чем на
+# существующий, — это тайминг-оракул для перебора зарегистрированных адресов
+# (OWASP, user enumeration). Считаем один раз при импорте модуля.
+_DUMMY_PASSWORD_HASH = hash_password("timing-attack-mitigation-not-a-real-password")
 
 
 @router.post(
@@ -78,7 +86,18 @@ async def register(
         password_hash=hash_password(payload.password),
     )
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Гонка: между проверкой выше и commit'ом кто-то успел занять этот email
+        # (UNIQUE-индекс на users.email отверг вставку). Возвращаем тот же 409,
+        # что и при обычном дубликате, вместо HTTP 500. rollback обязателен,
+        # иначе сессия останется в broken-состоянии.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Пользователь с таким email уже существует",
+        ) from None
     await session.refresh(user)  # подтянуть id и created_at, проставленные БД
 
     # Письмо для подтверждения почты при регистрации НЕ шлём автоматически:
@@ -111,6 +130,10 @@ async def login(
         detail="Неверный email или пароль",
     )
     if user is None:
+        # Прогоняем проверку против фиктивного хэша, чтобы время ответа на
+        # несуществующий email совпадало с временем ответа на существующий
+        # (иначе по задержке можно отличать зарегистрированные адреса).
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         raise invalid_credentials
     if not verify_password(payload.password, user.password_hash):
         raise invalid_credentials
