@@ -13,7 +13,7 @@ OWASP A01). Паттерн 404-вместо-403 — как в остальных
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -165,6 +165,26 @@ async def run_due(
     в приложение; также доступна ручная кнопка «Выполнить сейчас».
     """
     now = datetime.now(timezone.utc)
+
+    # Сериализация одновременных прогонов ОДНОГО пользователя. Без неё два
+    # параллельных /run (две вкладки/устройства, либо авто-запуск при заходе +
+    # ручная кнопка) при READ COMMITTED оба прочитали бы правило с одним и тем
+    # же next_run_at (UPDATE курсора ещё не закоммичен), оба создали бы одни и
+    # те же операции и дважды сдвинули баланс — двойное начисление.
+    #
+    # pg_advisory_xact_lock берёт блокировку на уровне транзакции по ключу
+    # owner_id: второй /run ждёт коммита первого, затем перечитывает правила с
+    # уже сдвинутым next_run_at и создаёт 0 операций. Лок снимается автоматически
+    # при commit/rollback. Лочим по конкретному юзеру, а не глобально, чтобы
+    # прогоны разных пользователей шли параллельно.
+    #
+    # Только для PostgreSQL: на SQLite (локальные/CI-прогоны без Postgres) такой
+    # функции нет, а гонки в однопроцессном тесте и так не возникает.
+    if session.bind.dialect.name == "postgresql":
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": current_user.id},
+        )
 
     # Берём только активные правила, у которых уже наступил срок.
     stmt = (
