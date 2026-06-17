@@ -31,6 +31,18 @@
 
 ---
 
+## Скриншоты
+
+Главная панель — общий капитал, расходы за месяц, топ-категории, последние операции и прогресс по бюджетам:
+
+![Главная панель FinTrack](docs/img/dashboard.png)
+
+| Учёт операций | Аналитика и отчёты |
+|:---:|:---:|
+| ![Операции](docs/img/transactions.png) | ![Отчёты](docs/img/reports.png) |
+
+---
+
 ## Стек
 
 | Слой | Технологии |
@@ -39,6 +51,16 @@
 | База данных | PostgreSQL 15 |
 | Frontend | TypeScript 6, React 19, Vite 8, Mantine 9, TanStack Query, Zod |
 | Инфраструктура | Docker, docker-compose, GitHub Flow с `--no-ff` merge, Conventional Commits |
+
+---
+
+## API
+
+FinTrack предоставляет открытый REST API (39 эндпоинтов, спецификация OpenAPI 3.0).
+После запуска интерактивная документация (Swagger UI) доступна локально, без внешних CDN:
+
+- Swagger UI — `http://127.0.0.1:60000/docs`
+- OpenAPI-схема — `http://127.0.0.1:60000/openapi.json`
 
 ---
 
@@ -145,6 +167,24 @@ docker compose down -v      # остановить + полностью снес
 
 ---
 
+## Запуск тестов
+
+Тесты выполняются внутри backend-контейнера (используется отдельная БД `fintrack_test`):
+
+```powershell
+docker compose exec backend pytest
+```
+
+С отчётом о покрытии кода:
+
+```powershell
+docker compose exec backend pytest --cov=app
+```
+
+Всего 122 теста (модульные, интеграционные и системный e2e); на PostgreSQL проходят 100 %.
+
+---
+
 ## Известные особенности Windows-окружения
 
 1. **PowerShell блокирует скрипты по умолчанию.** Перед первым `npm run dev` или `Activate.ps1` в новом окне:
@@ -170,8 +210,10 @@ financemanagement/
 ├── frontend/                 ← React SPA
 │   ├── src/                  ← компоненты, страницы, api-клиент
 │   └── package.json
+├── docs/                     ← документация (ПЗ, скриншоты)
 ├── docker-compose.yml        ← запуск БД + бэкенда
 ├── seed_test_data.py         ← скрипт для тестовых данных (опционально)
+├── CHANGELOG.md              ← история версий
 └── README.md
 ```
 
